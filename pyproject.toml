@@ -1,0 +1,52 @@
+[project]
+name = "qzct-login"
+version = "1.0.1"
+description = "校园网自动登录 + 定时关机工具"
+readme = "README.md"
+license = {text = "LICENSE"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Your Name"}
+]
+keywords = ["校园网", "自动登录", "定时关机", "PyQt5"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "PyQt5>=5.15.0",
+    "requests>=2.25.0",
+    "cryptography>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "flake8",
+    "pytest",
+]
+
+[project.scripts]
+qzct = "main_window:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["."]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

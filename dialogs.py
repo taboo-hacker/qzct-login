@@ -1,4 +1,6 @@
 import datetime
+import os
+import sys
 from zhdate import ZhDate
 from lunar_utils import LunarUtils
 from PyQt5.QtWidgets import QDialog, QMainWindow, QWidget, QFormLayout, QLineEdit, QDateEdit, QHBoxLayout, QPushButton, QMessageBox, QVBoxLayout, QLabel, QListWidget, QComboBox, QInputDialog, QFrame, QCheckBox, QGridLayout, QListWidgetItem, QTabWidget, QDialogButtonBox, QCalendarWidget, QSplitter
@@ -7,6 +9,90 @@ from PyQt5.QtGui import QFont, QTextCharFormat, QColor
 
 # 导入新的日志系统
 from logger import info, debug, warning, error, critical
+
+
+# 版本号缓存
+_cached_project_version = None
+
+
+def get_project_version():
+    """
+    从 pyproject.toml 中读取项目版本号
+    
+    功能说明：
+        - 定位项目根目录下的 pyproject.toml 文件
+        - 解析文件内容并提取 version 字段
+        - 使用缓存机制避免重复读取
+        - 如果读取失败，返回默认版本号 "1.0.0"
+    
+    参数：
+        无
+    
+    返回值：
+        str: 项目版本号
+    
+    异常：
+        无（异常会被捕获并返回默认值）
+    """
+    global _cached_project_version
+    # 如果缓存存在，直接返回
+    if _cached_project_version is not None:
+        return _cached_project_version
+    
+    try:
+        # 获取项目根目录
+        if getattr(sys, 'frozen', False):
+            # 打包后的程序
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            # 开发环境
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        pyproject_path = os.path.join(base_dir, 'pyproject.toml')
+        
+        # 如果当前目录找不到，尝试向上查找
+        if not os.path.exists(pyproject_path):
+            parent_dir = os.path.dirname(base_dir)
+            pyproject_path = os.path.join(parent_dir, 'pyproject.toml')
+        
+        if not os.path.exists(pyproject_path):
+            warning("dialogs", "找不到 pyproject.toml 文件，使用默认版本号")
+            _cached_project_version = "1.0.0"
+            return _cached_project_version
+        
+        # 使用 tomllib 或 tomli 解析
+        try:
+            import tomllib
+            with open(pyproject_path, 'rb') as f:
+                data = tomllib.load(f)
+        except ImportError:
+            # Python 3.11 以下使用 tomli
+            try:
+                import tomli
+                with open(pyproject_path, 'rb') as f:
+                    data = tomli.load(f)
+            except ImportError:
+                # 如果都没有，手动解析
+                with open(pyproject_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                for line in content.split('\n'):
+                    if line.strip().startswith('version'):
+                        version = line.split('=')[1].strip().strip('"').strip("'")
+                        _cached_project_version = version
+                        debug("dialogs", f"从 pyproject.toml 读取到版本号: {version}")
+                        return version
+                _cached_project_version = "1.0.0"
+                return _cached_project_version
+        
+        version = data.get('project', {}).get('version', '1.0.0')
+        _cached_project_version = version
+        debug("dialogs", f"从 pyproject.toml 读取到版本号: {version}")
+        return version
+    
+    except Exception as e:
+        error("dialogs", f"读取 pyproject.toml 失败: {e}", exc_info=True)
+        _cached_project_version = "1.0.0"
+        return _cached_project_version
 
 from config import global_config, DEFAULT_CONFIG, WEEKDAY_MAPPING, save_config
 from date_rules import should_work_today
@@ -854,45 +940,59 @@ class SettingsDialog(QDialog):
 
 
 class AboutDialog(QDialog):
+    """
+    关于我们对话框
+    
+    功能说明：
+        - 显示程序标题、版本号、说明信息
+        - 提供 GitHub 链接
+        - 显示版权信息
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("关于我们")
-        self.setFixedSize(400, 300)
+        self.setMinimumSize(450, 380)
         
         layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
         
         # 标题
         title_label = QLabel("校园网自动登录 + 定时关机")
-        title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Weight.Bold))
+        title_label.setFont(QFont("Microsoft YaHei", 18, QFont.Weight.Bold))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         layout.addSpacing(20)
         
-        # 版本
-        version_label = QLabel("版本：1.0.0")
-        version_label.setFont(QFont("Microsoft YaHei", 12))
+        # 版本 - 从 pyproject.toml 读取
+        version = get_project_version()
+        version_label = QLabel(f"版本：{version}")
+        version_label.setFont(QFont("Microsoft YaHei", 13))
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(version_label)
+        layout.addSpacing(10)
         
         # 说明
         desc_label = QLabel("这是一个用于自动连接校园网并定时关机的工具")
-        desc_label.setFont(QFont("Microsoft YaHei", 10))
+        desc_label.setFont(QFont("Microsoft YaHei", 11))
         desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
+        layout.addSpacing(15)
         
         # GitHub链接
-        github_label = QLabel("GitHub: <a href='https://github.com/taboo-hacker'>https://github.com/taboo-hacker</a>")
-        github_label.setFont(QFont("Microsoft YaHei", 10))
+        github_label = QLabel('GitHub: <a href="https://github.com/taboo-hacker">https://github.com/taboo-hacker</a>')
+        github_label.setFont(QFont("Microsoft YaHei", 11))
         github_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         github_label.setOpenExternalLinks(True)
         layout.addWidget(github_label)
         layout.addSpacing(30)
         
         # 版权信息
-        copyright_label = QLabel("© 2025 校园网自动登录工具")
-        copyright_label.setFont(QFont("Microsoft YaHei", 9))
+        copyright_label = QLabel("© 2026 校园网自动登录工具")
+        copyright_label.setFont(QFont("Microsoft YaHei", 10))
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        copyright_label.setStyleSheet("color: #666666;")
         layout.addWidget(copyright_label)
         
         # 按钮

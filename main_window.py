@@ -458,7 +458,25 @@ class MainWindow(QMainWindow):
         self._log_write(text)
 
 
-if __name__ == "__main__":
+def main():
+    """
+    主函数 - 程序入口点
+    
+    功能说明：
+        - 创建或获取 QApplication 实例
+        - 设置应用程序字体
+        - 创建并显示主窗口
+        - 启动应用程序事件循环
+    
+    参数：
+        无
+    
+    返回值：
+        int: 应用程序退出码
+    
+    异常：
+        无
+    """
     # 确保只创建一个应用程序实例
     app = QApplication.instance()
     if not app:
@@ -467,3 +485,7 @@ if __name__ == "__main__":
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
