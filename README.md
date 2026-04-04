@@ -25,7 +25,7 @@ QZCT 校园登录助手是一款专为校园网络设计的自动化工具，帮
 ## 技术栈
 
 - Python 3.13+
-- PyQt6 (GUI框架)
+- PyQt5 (GUI框架)
 - requests (网络请求)
 - cryptography (密码加密)
 
