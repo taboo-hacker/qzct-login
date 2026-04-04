@@ -22,8 +22,8 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/yourusername/qzct.git
-cd qzct
+git clone https://github.com/taboo-hacker/qzct-login.git
+cd qzct-login
 ```
 
 ### 2. 安装依赖
@@ -56,7 +56,7 @@ python main_window.py
 ## 项目结构
 
 ```
-qzct/
+qzct-login/
 ├── __pycache__/          # 编译缓存
 ├── campus_login.py        # 校园登录模块
 ├── config.json            # 配置文件
@@ -65,11 +65,13 @@ qzct/
 ├── dialogs.py             # 对话框组件
 ├── encryption_key.key     # 加密密钥
 ├── encryption_salt.key    # 加密盐值
+├── force_reset_master_password.py  # 强制重置主密码
 ├── logger.py              # 日志管理
 ├── lunar_utils.py         # 农历工具
 ├── main_window.py         # 主窗口
 ├── qzct_login.py          # QZCT登录模块
 ├── requirements.txt       # 依赖文件
+├── reset_master_password.py  # 重置主密码
 ├── security.py            # 安全相关
 ├── shutdown.py            # 关机功能
 ├── tasks.py               # 任务管理
