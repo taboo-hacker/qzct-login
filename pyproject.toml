@@ -1,6 +1,6 @@
 [project]
 name = "qzct-login"
-version = "1.0.1"
+version = "1.0.3"
 description = "校园网自动登录 + 定时关机工具"
 readme = "README.md"
 license = {text = "LICENSE"}
