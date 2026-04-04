@@ -1,0 +1,26 @@
+# 忽略配置文件
+config.json
+
+# 忽略加密密钥文件
+encryption_key.key
+encryption_salt.key
+
+# 忽略编译缓存
+__pycache__/
+*.pyc
+
+# 忽略其他可能的临时文件
+*.log
+*.tmp
+*.temp
+
+# 忽略编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 忽略操作系统文件
+Thumbs.db
+.DS_Store
