@@ -24,6 +24,7 @@ dependencies = [
     "PyQt5>=5.15.0",
     "requests>=2.25.0",
     "cryptography>=3.0.0",
+    "zhdate>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +35,7 @@ dev = [
 ]
 
 [project.scripts]
-qzct = "main_window:main"
+qzct = "main:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
