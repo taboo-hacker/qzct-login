@@ -1,4 +1,6 @@
 PyQt5
 requests
 cryptography
-zhdate
+lunar-python
+tomli; python_version < '3.11'
+loguru

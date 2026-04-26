@@ -5,9 +5,11 @@ import json
 import requests
 import subprocess
 import datetime
+import xml.sax.saxutils
 from requests.exceptions import RequestException
 from system_core import global_config, ISP_MAPPING, should_work_today
 from infrastructure import info, error
+from concurrency import task, TaskContext
 
 
 # ==========================================
@@ -74,12 +76,15 @@ def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
     Returns:
         str: XML格式的WiFi配置文件内容
     """
+    escaped_wifi_name = xml.sax.saxutils.escape(wifi_name)
+    escaped_password = xml.sax.saxutils.escape(password)
+    
     profile_xml = f"""<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
-    <name>{wifi_name}</name>
+    <name>{escaped_wifi_name}</name>
     <SSIDConfig>
         <SSID>
-            <name>{wifi_name}</name>
+            <name>{escaped_wifi_name}</name>
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
@@ -94,7 +99,7 @@ def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
             <sharedKey>
                 <keyType>passPhrase</keyType>
                 <protected>false</protected>
-                <keyMaterial>{password}</keyMaterial>
+                <keyMaterial>{escaped_password}</keyMaterial>
             </sharedKey>
         </security>
     </MSM>
@@ -171,9 +176,12 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
 def auto_connect_wifi():
     """
     自动连接WiFi（使用全局配置）
-    
+
     从全局配置读取WiFi信息，尝试自动连接。
     包含重试逻辑，直到连接成功或达到最大重试次数。
+
+    Returns:
+        bool: True表示连接成功，False表示连接失败
     """
     wifi_name = global_config["WIFI_NAME"]
     wifi_password = global_config["WIFI_PASSWORD"]
@@ -188,18 +196,20 @@ def auto_connect_wifi():
         if is_wifi_connected(wifi_name):
             info("business", f"WiFi已连接：{wifi_name}")
             return True
-        
+
         retry_count += 1
         info("business", f"第{retry_count}次尝试连接WiFi：{wifi_name}")
-        
-        connect_wifi(wifi_name, wifi_password)
-        
+
+        if connect_wifi(wifi_name, wifi_password):
+            info("business", f"WiFi连接成功：{wifi_name}")
+            return True
+
         if retry_count < max_retry:
             info("business", f"等待{retry_interval}秒后重试...")
             time.sleep(retry_interval)
-    
+
     error("business", f"超过{max_retry}次重试，WiFi连接失败")
-    raise TimeoutError(f"超过{max_retry}次重试，WiFi连接失败")
+    return False
 
 
 # ==========================================
@@ -263,7 +273,7 @@ def campus_login():
             "wlan_user_ip": config["wlan_user_ip"],
             "wlan_user_ipv6": "",
             "wlan_user_mac": config["wlan_user_mac"],
-            "wlan_ac_ip": config["wlan_ac_name"],
+            "wlan_ac_ip": config["wlan_ac_ip"],
             "wlan_ac_name": config["wlan_ac_name"],
             "jsVersion": "4.2.2",
             "terminal_type": "1",
@@ -330,14 +340,13 @@ def run_tasks_once():
     info("business", "今天需要执行任务，开始执行流程")
     
     info("business", "开始连接WiFi网络")
-    try:
-        auto_connect_wifi()
+    wifi_connected = auto_connect_wifi()
+    if wifi_connected:
         info("business", "WiFi网络连接成功")
-    except TimeoutError as e:
-        error("business", f"WiFi连接超时：{e}")
-    except Exception as e:
-        error("business", f"WiFi连接异常：{e}")
-    
+    else:
+        error("business", "WiFi连接失败，终止后续任务")
+        return
+
     info("business", "开始登录校园网认证系统")
     try:
         campus_login()
@@ -368,3 +377,81 @@ def run_tasks_once():
         error("business", f"设置关机异常：{e}")
     
     info("business", "完整任务链执行完成")
+
+
+@task("检查执行条件", timeout=10)
+def task_check_condition(ctx: TaskContext, check_date=None) -> dict:
+    ctx.log("正在检查执行条件...")
+    today = check_date if check_date else datetime.date.today()
+    ctx.log(f"当前日期：{today}")
+    
+    need_work = should_work_today(today)
+    
+    if not need_work:
+        ctx.log("今天无需执行任务（节假日或周末）")
+        return {"need_work": False, "date": today}
+    
+    ctx.log("今天需要执行任务，开始执行流程")
+    return {"need_work": True, "date": today}
+
+
+@task("连接WiFi", timeout=120)
+def task_connect_wifi(ctx: TaskContext) -> dict:
+    ctx.log("开始连接WiFi网络")
+    ctx.set_progress(10)
+
+    wifi_connected = auto_connect_wifi()
+    if wifi_connected:
+        ctx.log("WiFi网络连接成功")
+        ctx.set_progress(100)
+        return {"wifi_connected": True}
+    else:
+        ctx.log("WiFi连接失败")
+        return {"wifi_connected": False, "error": "连接失败"}
+
+
+@task("登录校园网", timeout=30)
+def task_campus_login(ctx: TaskContext) -> dict:
+    ctx.log("开始登录校园网认证系统")
+    ctx.set_progress(10)
+    
+    try:
+        campus_login()
+        ctx.log("校园网认证系统登录成功")
+        ctx.set_progress(100)
+        return {"login_successful": True}
+    except Exception as e:
+        ctx.log(f"校园网登录异常：{e}")
+        return {"login_successful": False, "error": str(e)}
+
+
+@task("设置定时关机", timeout=10)
+def task_set_shutdown(ctx: TaskContext, check_date=None) -> dict:
+    ctx.log("开始设置定时关机")
+    
+    try:
+        shutdown_hour = global_config["SHUTDOWN_HOUR"]
+        shutdown_min = global_config["SHUTDOWN_MIN"]
+        
+        today = check_date if check_date else datetime.date.today()
+        shutdown_time = datetime.datetime.combine(
+            today, datetime.time(shutdown_hour, shutdown_min)
+        )
+        now = datetime.datetime.now()
+        
+        if now >= shutdown_time:
+            ctx.log(f"当前时间已过今日关机时间（{shutdown_hour:02d}:{shutdown_min:02d}），不再设置关机")
+            return {"shutdown_set": False, "reason": "time_passed"}
+        else:
+            seconds = int((shutdown_time - now).total_seconds())
+            if seconds > 0:
+                set_shutdown_timer(seconds)
+                ctx.log(f"已设置定时关机，将在 {shutdown_hour:02d}:{shutdown_min:02d} 自动关机（{seconds}秒后）")
+                ctx.set_progress(100)
+                return {"shutdown_set": True, "seconds": seconds}
+            else:
+                ctx.log("关机时间计算无效，无法设置关机")
+                return {"shutdown_set": False, "reason": "invalid_time"}
+    except Exception as e:
+        ctx.log(f"设置关机异常：{e}")
+        return {"shutdown_set": False, "error": str(e)}
