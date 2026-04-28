@@ -1,6 +1,6 @@
 [project]
 name = "qzct-login"
-version = "1.0.3"
+version = "1.1.0"
 description = "校园网自动登录 + 定时关机工具"
 readme = "README.md"
 license = {text = "LICENSE"}
@@ -24,7 +24,9 @@ dependencies = [
     "PyQt5>=5.15.0",
     "requests>=2.25.0",
     "cryptography>=3.0.0",
-    "zhdate>=1.0.0",
+    "lunar-python>=1.0.0",
+    "tomli>=2.0.0; python_version < '3.11'",
+    "loguru>=0.7.0",
 ]
 
 [project.optional-dependencies]

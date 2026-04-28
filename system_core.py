@@ -1,63 +1,22 @@
 import os
+import copy
 import json
 import base64
-import logging
 import datetime
+import threading
 from PyQt5.QtWidgets import QMessageBox, QInputDialog, QApplication, QLineEdit
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
-from zhdate import ZhDate
+from lunar_python import Solar
 
-# 配置日志
-def info(module_name, message):
-    logging.info(message, extra={"logger_name": module_name})
-
-def error(module_name, message, exc_info=False):
-    logging.error(message, extra={"logger_name": module_name}, exc_info=exc_info)
-
-def debug(module_name, message):
-    logging.debug(message, extra={"logger_name": module_name})
-
-def warning(module_name, message):
-    logging.warning(message, extra={"logger_name": module_name})
+from infrastructure import info, error
 
 
 # ==========================================
 # 农历工具类
 # ==========================================
-SOLAR_TERMS_2020_2030 = {
-    2024: {
-        1: {6: "小寒", 20: "大寒"},
-        2: {4: "立春", 19: "雨水"},
-        3: {5: "惊蛰", 20: "春分"},
-        4: {4: "清明", 20: "谷雨"},
-        5: {5: "立夏", 21: "小满"},
-        6: {5: "芒种", 21: "夏至"},
-        7: {6: "小暑", 22: "大暑"},
-        8: {7: "立秋", 23: "处暑"},
-        9: {7: "白露", 23: "秋分"},
-        10: {8: "寒露", 23: "霜降"},
-        11: {7: "立冬", 22: "小雪"},
-        12: {6: "大雪", 21: "冬至"}
-    },
-    2025: {
-        1: {5: "小寒", 20: "大寒"},
-        2: {3: "立春", 18: "雨水"},
-        3: {5: "惊蛰", 20: "春分"},
-        4: {4: "清明", 20: "谷雨"},
-        5: {5: "立夏", 21: "小满"},
-        6: {5: "芒种", 21: "夏至"},
-        7: {6: "小暑", 22: "大暑"},
-        8: {7: "立秋", 23: "处暑"},
-        9: {7: "白露", 23: "秋分"},
-        10: {8: "寒露", 23: "霜降"},
-        11: {7: "立冬", 22: "小雪"},
-        12: {6: "大雪", 21: "冬至"}
-    }
-}
-
 TRADITIONAL_FESTIVALS = {
     (1, 1): "春节",
     (1, 15): "元宵节",
@@ -121,15 +80,15 @@ class LunarUtils:
             dict: 包含农历信息的字典
         """
         try:
-            dt = datetime.datetime.combine(date, datetime.time.min)
-            lunar = ZhDate.from_datetime(dt)
+            solar = Solar.fromYmd(date.year, date.month, date.day)
+            lunar = solar.getLunar()
             lunar_info = {
-                "lunar_year": lunar.lunar_year,
-                "lunar_month": lunar.lunar_month,
-                "lunar_day": lunar.lunar_day,
-                "is_leap_month": getattr(lunar, 'is_leap_month', False),
-                "full_str": str(lunar),
-                "short_str": str(lunar)[2:] if str(lunar).startswith("农历") else str(lunar)
+                "lunar_year": lunar.getYear(),
+                "lunar_month": abs(lunar.getMonth()),
+                "lunar_day": lunar.getDay(),
+                "is_leap_month": lunar.getMonth() < 0,
+                "full_str": lunar.toString(),
+                "short_str": f"{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
             }
             return lunar_info
         except Exception as e:
@@ -140,20 +99,22 @@ class LunarUtils:
     def get_solar_term(date):
         """
         获取指定日期的节气
-        
+
+        使用 lunar-python 库计算节气，支持任意年份。
+
         Args:
             date (datetime.date): 公历日期
-            
+
         Returns:
             str: 节气名称，如"立春"，如果不是节气则返回空字符串
         """
-        year, month, day = date.year, date.month, date.day
-        if year not in SOLAR_TERMS_2020_2030:
+        try:
+            solar = Solar.fromYmd(date.year, date.month, date.day)
+            lunar = solar.getLunar()
+            jie_qi = lunar.getJieQi()
+            return jie_qi if jie_qi else ""
+        except Exception:
             return ""
-        year_terms = SOLAR_TERMS_2020_2030[year]
-        if month in year_terms and day in year_terms[month]:
-            return year_terms[month][day]
-        return ""
     
     @staticmethod
     def get_festivals(date):
@@ -188,7 +149,15 @@ class LunarUtils:
         Returns:
             dict: 包含宜和忌的字典
         """
-        return get_simplified_yi_ji(date)
+        try:
+            solar = Solar.fromYmd(date.year, date.month, date.day)
+            lunar = solar.getLunar()
+            yi = lunar.getDayYi()
+            ji = lunar.getDayJi()
+            return {"宜": yi, "忌": ji}
+        except Exception as e:
+            error("system_core", f"获取宜忌信息失败：{e}")
+            return get_simplified_yi_ji(date)
     
     @staticmethod
     def get_lunar_info(date):
@@ -210,14 +179,50 @@ class LunarUtils:
         lunar_info["festivals"] = festivals
         yi_ji = LunarUtils.get_yi_ji(date)
         lunar_info["yi_ji"] = yi_ji
+        
+        try:
+            solar = Solar.fromYmd(date.year, date.month, date.day)
+            lunar = solar.getLunar()
+            lunar_info["year_ganzhi"] = lunar.getYearInGanZhi()
+            lunar_info["month_ganzhi"] = lunar.getMonthInGanZhi()
+            lunar_info["day_ganzhi"] = lunar.getDayInGanZhi()
+            lunar_info["year_shengxiao"] = lunar.getYearShengXiao()
+            lunar_info["jieqi"] = lunar.getJieQi()
+        except Exception as e:
+            error("system_core", f"获取干支生肖信息失败：{e}")
+        
         return lunar_info
 
 
 # ==========================================
 # 安全加密模块
 # ==========================================
-KEY_FILE = "encryption_key.key"
-SALT_FILE = "encryption_salt.key"
+_CONFIG_DIR = None
+
+
+def _get_config_dir():
+    """获取配置目录（确保目录存在），并迁移旧文件"""
+    global _CONFIG_DIR
+    if _CONFIG_DIR is not None:
+        return _CONFIG_DIR
+    _CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".qzct")
+    os.makedirs(_CONFIG_DIR, exist_ok=True)
+    _migrate_old_files(_CONFIG_DIR)
+    return _CONFIG_DIR
+
+
+def _migrate_old_files(config_dir: str):
+    """将旧工作目录中的加密密钥文件迁移到新位置"""
+    import shutil
+    old_files = ["encryption_key.key", "encryption_salt.key"]
+    for filename in old_files:
+        new_path = os.path.join(config_dir, filename)
+        if os.path.exists(filename) and not os.path.exists(new_path):
+            shutil.copy2(filename, new_path)
+
+
+KEY_FILE = os.path.join(_get_config_dir(), "encryption_key.key")
+SALT_FILE = os.path.join(_get_config_dir(), "encryption_salt.key")
 MASTER_PASSWORD_KEY = "MASTER_PASSWORD"
 
 
@@ -256,7 +261,7 @@ def generate_derived_key_from_master_password(master_password, salt=None):
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
-        iterations=100000,
+        iterations=600000,
         backend=default_backend()
     )
     key = base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
@@ -312,12 +317,7 @@ def prompt_for_master_password():
             return "temp_password"
         
         if not password:
-            QInputDialog.getText(
-                None, 
-                "提示", 
-                "主密码不能为空，请重新输入：", 
-                echo=QLineEdit.Password
-            )
+            QMessageBox.warning(None, "提示", "主密码不能为空，请重新输入：")
             continue
         
         confirm_password, ok = QInputDialog.getText(
@@ -332,12 +332,7 @@ def prompt_for_master_password():
             return "temp_password"
         
         if password != confirm_password:
-            QInputDialog.getText(
-                None, 
-                "提示", 
-                "两次输入的密码不一致，请重新输入：", 
-                echo=QLineEdit.Password
-            )
+            QMessageBox.warning(None, "提示", "两次输入的密码不一致，请重新输入：")
             continue
         
         info("system_core", "主密码设置成功")
@@ -367,12 +362,7 @@ def prompt_for_verify_master_password():
             return None
         
         if not password:
-            QInputDialog.getText(
-                None, 
-                "提示", 
-                "主密码不能为空，请重新输入：", 
-                echo=QLineEdit.Password
-            )
+            QMessageBox.warning(None, "提示", "主密码不能为空，请重新输入：")
             continue
         
         return password
@@ -419,22 +409,25 @@ def decrypt_data(encrypted_data, derived_key):
         raise
 
 
-def is_encrypted(data):
+def is_encrypted(data) -> bool:
     """
     判断数据是否已加密
-    
+
+    数据存储格式为 base64(Fernet_token)，其中 Fernet token 以 "gA" 开头。
+    通过解一层 base64 后检查是否为有效 Fernet token 前缀来判断。
+
     Args:
         data (str): 要检查的数据
-    
+
     Returns:
-        bool: True表示已加密，False表示未加密
+        bool: True 表示已加密，False 表示未加密
     """
-    if not data:
+    if not isinstance(data, str) or len(data) < 20:
         return False
     try:
-        decoded = base64.b64decode(data.encode())
-        return len(decoded) >= 44
-    except:
+        decoded = base64.b64decode(data.encode(), validate=True)
+        return len(decoded) > 20 and decoded.startswith(b"gA")
+    except Exception:
         return False
 
 
@@ -513,7 +506,7 @@ def reencrypt_sensitive_data(config, old_derived_key, new_derived_key):
             else:
                 decrypted_data = config[field]
             config[field] = encrypt_data(decrypted_data, new_derived_key)
-    
+
     info("system_core", "敏感数据已重新加密")
 
 
@@ -533,6 +526,7 @@ def load_and_update_encryption(config):
     
     try:
         master_password, old_derived_key = load_and_decrypt_master_password(config)
+        return master_password, old_derived_key
     except Exception as e:
         error("system_core", f"解密主密码失败：{e}")
         reply = QMessageBox.question(
@@ -546,17 +540,12 @@ def load_and_update_encryption(config):
             return initialize_first_run(config)
         else:
             raise Exception("用户取消重置主密码")
-    
-    new_derived_key = regenerate_derived_key(master_password)
-    reencrypt_sensitive_data(config, old_derived_key, new_derived_key)
-    
-    return master_password, new_derived_key
 
 
 # ==========================================
 # 配置文件管理模块
 # ==========================================
-CONFIG_FILE = "config.json"
+CONFIG_FILE = os.path.join(_get_config_dir(), "config.json")
 
 DEFAULT_CONFIG = {
     "WIFI_NAME": "",
@@ -609,14 +598,15 @@ DEFAULT_CONFIG = {
         "WEEKLY_EXECUTE_DAYS": [0, 1, 2, 3, 4],
         "CUSTOM_HOLIDAY_PERIODS": [],
         "CUSTOM_WORKDAY_PERIODS": []
-    }
+    },
+    "_DECRYPT_FAILED_FIELDS": []
 }
 
 ISP_MAPPING = {
-    "中国电信": "@telecom",
-    "中国移动": "@cmcc",
-    "中国联通": "@unicom",
-    "校内资源": "@local"
+    "cmcc": "@cmcc",
+    "telecom": "@telecom",
+    "unicom": "@unicom",
+    "local": "@local"
 }
 
 WEEKDAY_MAPPING = {
@@ -629,100 +619,132 @@ WEEKDAY_MAPPING = {
     6: "周日"
 }
 
-global_config = DEFAULT_CONFIG.copy()
+global_config = copy.deepcopy(DEFAULT_CONFIG)
 current_derived_key = None
+_config_lock = threading.Lock()
+
+
+def get_config_snapshot():
+    """
+    获取配置的线程安全快照（深拷贝）
+
+    工作线程在读取配置时应使用此函数而非直接访问 global_config，
+    避免与主线程（UI）发生竞态条件。
+
+    Returns:
+        dict: 配置的深拷贝
+    """
+    with _config_lock:
+        return copy.deepcopy(global_config)
 
 
 def load_config():
     """
-    加载配置文件
-    
+    加载配置文件（原地更新 global_config，不改变对象引用）
+
     Returns:
-        None（直接修改 global_config 全局变量）
+        None
     """
     global global_config, current_derived_key
     try:
+        new_config = copy.deepcopy(DEFAULT_CONFIG)
+
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 loaded_config = json.load(f)
-            
-            for key, value in DEFAULT_CONFIG.items():
-                global_config[key] = value
+
             for key, value in loaded_config.items():
-                global_config[key] = value
-            
-            master_password, current_derived_key = load_and_update_encryption(global_config)
-            
-            sensitive_fields = ["WIFI_PASSWORD", "PASSWORD"]
-            for field in sensitive_fields:
-                if field in global_config and is_encrypted(global_config[field]):
+                if isinstance(value, (list, dict)):
+                    new_config[key] = copy.deepcopy(value)
+                else:
+                    new_config[key] = value
+
+            master_password, current_derived_key = load_and_update_encryption(new_config)
+
+            new_config["_DECRYPT_FAILED_FIELDS"] = []
+            for field in ["WIFI_PASSWORD", "PASSWORD"]:
+                if field in new_config and is_encrypted(new_config[field]):
                     try:
-                        global_config[field] = decrypt_data(global_config[field], current_derived_key)
+                        new_config[field] = decrypt_data(new_config[field], current_derived_key)
                         info("system_core", f"解密配置项：{field}")
                     except Exception as e:
                         error("system_core", f"解密 {field} 失败：{e}")
-                        if field in DEFAULT_CONFIG:
-                            global_config[field] = DEFAULT_CONFIG[field]
-            
-            if "ISP_SUFFIX" in global_config and "ISP_TYPE" not in global_config:
-                suffix = global_config["ISP_SUFFIX"]
+                        new_config["_DECRYPT_FAILED_FIELDS"].append(field)
+
+            if "ISP_SUFFIX" in new_config and "ISP_TYPE" not in new_config:
+                suffix = new_config["ISP_SUFFIX"]
                 for type_key, type_suffix in ISP_MAPPING.items():
                     if type_suffix == suffix:
-                        global_config["ISP_TYPE"] = type_key
-                        del global_config["ISP_SUFFIX"]
+                        new_config["ISP_TYPE"] = type_key
+                        del new_config["ISP_SUFFIX"]
                         break
-            
-            if "COMPENSATORY_WORKDAYS" not in global_config:
-                global_config["COMPENSATORY_WORKDAYS"] = DEFAULT_CONFIG["COMPENSATORY_WORKDAYS"].copy()
-            
-            if "DATE_RULES" not in global_config:
-                global_config["DATE_RULES"] = DEFAULT_CONFIG["DATE_RULES"].copy()
+
+            if "COMPENSATORY_WORKDAYS" not in new_config:
+                new_config["COMPENSATORY_WORKDAYS"] = DEFAULT_CONFIG["COMPENSATORY_WORKDAYS"].copy()
+
+            if "DATE_RULES" not in new_config:
+                new_config["DATE_RULES"] = DEFAULT_CONFIG["DATE_RULES"].copy()
             else:
                 for key in DEFAULT_CONFIG["DATE_RULES"]:
-                    if key not in global_config["DATE_RULES"]:
-                        global_config["DATE_RULES"][key] = DEFAULT_CONFIG["DATE_RULES"][key]
-                if "CUSTOM_HOLIDAYS" in global_config["DATE_RULES"]:
-                    global_config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = []
-                    del global_config["DATE_RULES"]["CUSTOM_HOLIDAYS"]
-                if "CUSTOM_WORKDAYS" in global_config["DATE_RULES"]:
-                    global_config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] = []
-                    del global_config["DATE_RULES"]["CUSTOM_WORKDAYS"]
-            
-            save_config()
+                    if key not in new_config["DATE_RULES"]:
+                        new_config["DATE_RULES"][key] = DEFAULT_CONFIG["DATE_RULES"][key]
+                if "CUSTOM_HOLIDAYS" in new_config["DATE_RULES"]:
+                    new_config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = []
+                    del new_config["DATE_RULES"]["CUSTOM_HOLIDAYS"]
+                if "CUSTOM_WORKDAYS" in new_config["DATE_RULES"]:
+                    new_config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] = []
+                    del new_config["DATE_RULES"]["CUSTOM_WORKDAYS"]
+
             info("system_core", f"从 {CONFIG_FILE} 加载配置成功")
         else:
-            for key, value in DEFAULT_CONFIG.items():
-                global_config[key] = value
-            master_password, current_derived_key = load_and_update_encryption(global_config)
+            master_password, current_derived_key = load_and_update_encryption(new_config)
             save_config()
             info("system_core", f"未找到配置文件，创建默认配置 {CONFIG_FILE}")
+
+        with _config_lock:
+            global_config.clear()
+            global_config.update(new_config)
+
     except Exception as e:
         error("system_core", f"加载配置失败，使用默认配置：{e}")
-        for key, value in DEFAULT_CONFIG.items():
-            global_config[key] = value
+        with _config_lock:
+            global_config.clear()
+            global_config.update(copy.deepcopy(DEFAULT_CONFIG))
+        QMessageBox.warning(
+            None,
+            "配置加载失败",
+            f"配置文件加载失败，已恢复为默认设置：\n{e}\n\n"
+            f"请检查 {CONFIG_FILE} 文件是否损坏。"
+        )
 
 
 def save_config():
     """
-    保存配置到文件
-    
+    保存配置到文件（使用原子写入，防止写入中断导致文件损坏）
+
     Returns:
         bool: 保存是否成功
     """
     try:
-        config_to_save = global_config.copy()
-        
-        sensitive_fields = ["WIFI_PASSWORD", "PASSWORD"]
-        for field in sensitive_fields:
-            if field in config_to_save and config_to_save[field] and not is_encrypted(config_to_save[field]):
-                try:
-                    config_to_save[field] = encrypt_data(config_to_save[field], current_derived_key)
-                    info("system_core", f"加密配置项：{field}")
-                except Exception as e:
-                    error("system_core", f"加密 {field} 失败：{e}")
-        
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        with _config_lock:
+            config_to_save = copy.deepcopy(global_config)
+
+        decrypt_failed = config_to_save.pop("_DECRYPT_FAILED_FIELDS", [])
+
+        for field in ["WIFI_PASSWORD", "PASSWORD"]:
+            val = config_to_save.get(field)
+            if val:
+                if field in decrypt_failed:
+                    continue
+                config_to_save[field] = encrypt_data(val, current_derived_key)
+
+        # 原子写入：先写临时文件，再重命名，防止写入中断导致配置损坏
+        tmp_file = CONFIG_FILE + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(config_to_save, f, ensure_ascii=False, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, CONFIG_FILE)
         info("system_core", f"配置已保存到 {CONFIG_FILE}")
         return True
     except Exception as e:
@@ -755,7 +777,10 @@ def change_master_password(old_password, new_password):
         for field in sensitive_fields:
             if field in global_config and global_config[field]:
                 if is_encrypted(global_config[field]):
-                    decrypted = decrypt_data(global_config[field], old_derived_key)
+                    try:
+                        decrypted = decrypt_data(global_config[field], old_derived_key)
+                    except Exception:
+                        continue
                 else:
                     decrypted = global_config[field]
                 global_config[field] = encrypt_data(decrypted, new_derived_key)

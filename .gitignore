@@ -24,3 +24,6 @@ __pycache__/
 # 忽略操作系统文件
 Thumbs.db
 .DS_Store
+
+# 忽略Trae IDE配置
+.trae/

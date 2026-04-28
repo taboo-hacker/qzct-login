@@ -5,9 +5,16 @@ import json
 import requests
 import subprocess
 import datetime
+import xml.sax.saxutils
 from requests.exceptions import RequestException
-from system_core import global_config, ISP_MAPPING, should_work_today
+from system_core import global_config, ISP_MAPPING, should_work_today, get_config_snapshot
 from infrastructure import info, error
+from concurrency import task, TaskContext
+
+
+def _sanitize(msg: str) -> str:
+    """移除日志中可能出现的密码明文"""
+    return re.sub(r'user_password=[^&]+', 'user_password=***', str(msg))
 
 
 # ==========================================
@@ -16,26 +23,26 @@ from infrastructure import info, error
 def cancel_shutdown():
     """
     取消之前设置的关机任务
-    
+
     执行 Windows shutdown /a 命令，取消任何待执行的关机任务。
     如果没有待执行的关机任务，此命令不会产生错误。
     """
-    os.system("shutdown /a >nul 2>&1")
+    subprocess.run(["shutdown", "/a"], capture_output=True)
     info("business", "已尝试取消之前的关机任务（如果有）")
 
 
 def set_shutdown_timer(seconds: int):
     """
     设置定时关机
-    
+
     在指定的秒数后自动关机。
     调用此函数前会先取消之前的关机任务。
-    
+
     Args:
         seconds (int): 关机倒计时（秒）
     """
     cancel_shutdown()
-    os.system(f"shutdown /s /t {seconds}")
+    subprocess.run(["shutdown", "/s", "/t", str(seconds)], capture_output=True)
     info("business", f"已设置在 {seconds} 秒后自动关机")
 
 
@@ -74,12 +81,15 @@ def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
     Returns:
         str: XML格式的WiFi配置文件内容
     """
+    escaped_wifi_name = xml.sax.saxutils.escape(wifi_name)
+    escaped_password = xml.sax.saxutils.escape(password)
+    
     profile_xml = f"""<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
-    <name>{wifi_name}</name>
+    <name>{escaped_wifi_name}</name>
     <SSIDConfig>
         <SSID>
-            <name>{wifi_name}</name>
+            <name>{escaped_wifi_name}</name>
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
@@ -94,7 +104,7 @@ def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
             <sharedKey>
                 <keyType>passPhrase</keyType>
                 <protected>false</protected>
-                <keyMaterial>{password}</keyMaterial>
+                <keyMaterial>{escaped_password}</keyMaterial>
             </sharedKey>
         </security>
     </MSM>
@@ -168,17 +178,25 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
                 error("business", f"清理临时文件失败：{str(e)}")
 
 
-def auto_connect_wifi():
+def auto_connect_wifi(cfg=None):
     """
     自动连接WiFi（使用全局配置）
-    
+
     从全局配置读取WiFi信息，尝试自动连接。
     包含重试逻辑，直到连接成功或达到最大重试次数。
+
+    Args:
+        cfg (dict, optional): 配置字典快照，默认使用 get_config_snapshot()
+
+    Returns:
+        bool: True表示连接成功，False表示连接失败
     """
-    wifi_name = global_config["WIFI_NAME"]
-    wifi_password = global_config["WIFI_PASSWORD"]
-    max_retry = global_config["MAX_WIFI_RETRY"]
-    retry_interval = global_config["RETRY_INTERVAL"]
+    if cfg is None:
+        cfg = get_config_snapshot()
+    wifi_name = cfg.get("WIFI_NAME", "")
+    wifi_password = cfg.get("WIFI_PASSWORD", "")
+    max_retry = cfg.get("MAX_WIFI_RETRY", 10)
+    retry_interval = cfg.get("RETRY_INTERVAL", 5)
 
     info("business", f"开始自动连接WiFi：{wifi_name}")
     info("business", f"最大重试次数：{max_retry}，重试间隔：{retry_interval}秒")
@@ -188,18 +206,20 @@ def auto_connect_wifi():
         if is_wifi_connected(wifi_name):
             info("business", f"WiFi已连接：{wifi_name}")
             return True
-        
+
         retry_count += 1
         info("business", f"第{retry_count}次尝试连接WiFi：{wifi_name}")
-        
-        connect_wifi(wifi_name, wifi_password)
-        
+
+        if connect_wifi(wifi_name, wifi_password):
+            info("business", f"WiFi连接成功：{wifi_name}")
+            return True
+
         if retry_count < max_retry:
             info("business", f"等待{retry_interval}秒后重试...")
             time.sleep(retry_interval)
-    
+
     error("business", f"超过{max_retry}次重试，WiFi连接失败")
-    raise TimeoutError(f"超过{max_retry}次重试，WiFi连接失败")
+    return False
 
 
 # ==========================================
@@ -223,21 +243,29 @@ def parse_jsonp(jsonp_text: str, callback: str) -> dict:
     raise ValueError("JSONP格式解析失败，响应内容：" + jsonp_text[:100])
 
 
-def campus_login():
+def campus_login(cfg=None) -> bool:
     """
     校园网登录函数（使用全局配置）
-    
+
     读取全局配置中的账号信息，构建登录请求并发送到校园网认证服务器。
+
+    Args:
+        cfg (dict, optional): 配置字典快照，默认使用 get_config_snapshot()
+
+    Returns:
+        bool: True 表示登录成功，False 表示登录失败
     """
-    isp_type = global_config.get("ISP_TYPE", "telecom")
+    if cfg is None:
+        cfg = get_config_snapshot()
+    isp_type = cfg.get("ISP_TYPE", "telecom")
     isp_suffix = ISP_MAPPING.get(isp_type, "@telecom")
 
     config = {
-        "username": global_config["USERNAME"],
-        "password": global_config["PASSWORD"],
+        "username": cfg.get("USERNAME", ""),
+        "password": cfg.get("PASSWORD", ""),
         "isp_suffix": isp_suffix,
         "login_url": "http://192.168.51.2:801/eportal/portal/login",
-        "wlan_user_ip": global_config["WAN_IP"],
+        "wlan_user_ip": cfg.get("WAN_IP", ""),
         "wlan_user_mac": "",
         "wlan_ac_ip": "",
         "wlan_ac_name": "",
@@ -253,6 +281,10 @@ def campus_login():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
     }
 
+    # 校园网认证服务器通常使用自签名证书，无法验证链
+    # 若环境支持证书验证，可将 verify 设为 True
+    info("business", "注意：SSL证书验证已禁用（校园网自签名证书）")
+
     session = requests.Session()
     try:
         params = {
@@ -263,7 +295,7 @@ def campus_login():
             "wlan_user_ip": config["wlan_user_ip"],
             "wlan_user_ipv6": "",
             "wlan_user_mac": config["wlan_user_mac"],
-            "wlan_ac_ip": config["wlan_ac_name"],
+            "wlan_ac_ip": config["wlan_ac_ip"],
             "wlan_ac_name": config["wlan_ac_name"],
             "jsVersion": "4.2.2",
             "terminal_type": "1",
@@ -288,15 +320,20 @@ def campus_login():
         
         if result.get("ret_code") == 0 or result.get("result") == 1:
             info("business", f"登录成功：{result.get('msg', '登录成功')}")
+            return True
         else:
-            error("business", f"登录失败：{result.get('msg', '未知错误')}", exc_info=False)
+            error("business", f"登录失败：{_sanitize(result.get('msg', '未知错误'))}", exc_info=False)
+            return False
 
     except RequestException as e:
-        error("business", f"网络请求异常：{str(e)}")
+        error("business", f"网络请求异常：{_sanitize(e)}")
+        return False
     except ValueError as e:
-        error("business", f"响应解析异常：{str(e)}")
+        error("business", f"响应解析异常：{_sanitize(e)}")
+        return False
     except Exception as e:
-        error("business", f"登录过程发生未知异常：{str(e)}")
+        error("business", f"登录过程发生未知异常：{_sanitize(e)}")
+        return False
     finally:
         session.close()
         info("business", "登录会话已关闭")
@@ -330,14 +367,13 @@ def run_tasks_once():
     info("business", "今天需要执行任务，开始执行流程")
     
     info("business", "开始连接WiFi网络")
-    try:
-        auto_connect_wifi()
+    wifi_connected = auto_connect_wifi()
+    if wifi_connected:
         info("business", "WiFi网络连接成功")
-    except TimeoutError as e:
-        error("business", f"WiFi连接超时：{e}")
-    except Exception as e:
-        error("business", f"WiFi连接异常：{e}")
-    
+    else:
+        error("business", "WiFi连接失败，终止后续任务")
+        return
+
     info("business", "开始登录校园网认证系统")
     try:
         campus_login()
@@ -348,8 +384,9 @@ def run_tasks_once():
     info("business", "开始设置定时关机")
     
     try:
-        shutdown_hour = global_config["SHUTDOWN_HOUR"]
-        shutdown_min = global_config["SHUTDOWN_MIN"]
+        cfg = get_config_snapshot()
+        shutdown_hour = cfg.get("SHUTDOWN_HOUR", 23)
+        shutdown_min = cfg.get("SHUTDOWN_MIN", 0)
         shutdown_time = datetime.datetime.combine(
             today, datetime.time(shutdown_hour, shutdown_min)
         )
@@ -368,3 +405,82 @@ def run_tasks_once():
         error("business", f"设置关机异常：{e}")
     
     info("business", "完整任务链执行完成")
+
+
+@task("检查执行条件", timeout=10)
+def task_check_condition(ctx: TaskContext, check_date=None) -> dict:
+    ctx.log("正在检查执行条件...")
+    today = check_date if check_date else datetime.date.today()
+    ctx.log(f"当前日期：{today}")
+    
+    need_work = should_work_today(today)
+    
+    if not need_work:
+        ctx.log("今天无需执行任务（节假日或周末）")
+        return {"need_work": False, "date": today}
+    
+    ctx.log("今天需要执行任务，开始执行流程")
+    return {"need_work": True, "date": today}
+
+
+@task("连接WiFi", timeout=120)
+def task_connect_wifi(ctx: TaskContext) -> dict:
+    ctx.log("开始连接WiFi网络")
+    ctx.set_progress(10)
+
+    wifi_connected = auto_connect_wifi()
+    if wifi_connected:
+        ctx.log("WiFi网络连接成功")
+        ctx.set_progress(100)
+        return {"wifi_connected": True}
+    else:
+        ctx.log("WiFi连接失败")
+        return {"wifi_connected": False, "error": "连接失败"}
+
+
+@task("登录校园网", timeout=30)
+def task_campus_login(ctx: TaskContext) -> dict:
+    ctx.log("开始登录校园网认证系统")
+    ctx.set_progress(10)
+
+    login_ok = campus_login()
+    if login_ok:
+        ctx.log("校园网认证系统登录成功")
+        ctx.set_progress(100)
+        return {"login_successful": True}
+    else:
+        ctx.log("校园网登录失败，请检查账号密码或网络")
+        return {"login_successful": False, "error": "登录返回失败"}
+
+
+@task("设置定时关机", timeout=10)
+def task_set_shutdown(ctx: TaskContext, check_date=None) -> dict:
+    ctx.log("开始设置定时关机")
+
+    cfg = get_config_snapshot()
+    try:
+        shutdown_hour = cfg.get("SHUTDOWN_HOUR", 23)
+        shutdown_min = cfg.get("SHUTDOWN_MIN", 0)
+        
+        today = check_date if check_date else datetime.date.today()
+        shutdown_time = datetime.datetime.combine(
+            today, datetime.time(shutdown_hour, shutdown_min)
+        )
+        now = datetime.datetime.now()
+        
+        if now >= shutdown_time:
+            ctx.log(f"当前时间已过今日关机时间（{shutdown_hour:02d}:{shutdown_min:02d}），不再设置关机")
+            return {"shutdown_set": False, "reason": "time_passed"}
+        else:
+            seconds = int((shutdown_time - now).total_seconds())
+            if seconds > 0:
+                set_shutdown_timer(seconds)
+                ctx.log(f"已设置定时关机，将在 {shutdown_hour:02d}:{shutdown_min:02d} 自动关机（{seconds}秒后）")
+                ctx.set_progress(100)
+                return {"shutdown_set": True, "seconds": seconds}
+            else:
+                ctx.log("关机时间计算无效，无法设置关机")
+                return {"shutdown_set": False, "reason": "invalid_time"}
+    except Exception as e:
+        ctx.log(f"设置关机异常：{e}")
+        return {"shutdown_set": False, "error": str(e)}
