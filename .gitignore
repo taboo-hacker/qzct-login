@@ -21,6 +21,10 @@ __pycache__/
 *.swo
 *~
 
+# 忽略 Trae AI 相关文件
+.claude/
+.trae/
+
 # 忽略操作系统文件
 Thumbs.db
 .DS_Store
