@@ -2,23 +2,32 @@
 基础节假日组件模块
 使用主题系统重构的节假日编辑组件
 """
-from typing import List, Optional, Dict, Any
 
+from typing import Any, Dict, List, Optional
+
+from PyQt5.QtCore import QDate
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QCheckBox, QMessageBox, QAbstractItemView,
+    QAbstractItemView,
     QDateEdit,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import Qt, QDate
 
-from system_core import global_config, DEFAULT_CONFIG
 from gui.style_helpers import (
-    create_button, create_label, create_section_title,
-    create_card_widget, create_tip_label,
+    create_button,
+    create_card_widget,
+    create_section_title,
+    create_tip_label,
 )
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
+from gui.style_manager import StyleManager
+from system_core import DEFAULT_CONFIG, global_config
 
 
 class BaseHolidayWidget(QWidget):
@@ -53,7 +62,7 @@ class BaseHolidayWidget(QWidget):
         header_layout = QVBoxLayout()
         header_layout.setSpacing(5)
 
-        title = create_section_title("\U0001F389 基础节假日列表")
+        title = create_section_title("\U0001f389 基础节假日列表")
         header_layout.addWidget(title)
 
         tip_label = create_tip_label("管理国务院发布的法定节假日，节假日期间不执行联网和关机任务")
@@ -88,9 +97,7 @@ class BaseHolidayWidget(QWidget):
         edit_layout.addWidget(QLabel("结束："))
         edit_layout.addWidget(self.end_edit)
 
-        add_btn = create_button(
-            "\u2795 添加", btn_type="success", min_width=80
-        )
+        add_btn = create_button("\u2795 添加", btn_type="success", min_width=80)
         add_btn.clicked.connect(self.add_period)
         edit_layout.addWidget(add_btn)
 
@@ -100,15 +107,9 @@ class BaseHolidayWidget(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(3)
         self.table.setHorizontalHeaderLabels(["名称", "开始日期", "结束日期"])
-        self.table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
-        )
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
         main_layout.addWidget(self.table)
@@ -117,23 +118,17 @@ class BaseHolidayWidget(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
-        edit_btn = create_button(
-            "\u270F\ufe0f 编辑", btn_type="primary", min_width=100
-        )
+        edit_btn = create_button("\u270f\ufe0f 编辑", btn_type="primary", min_width=100)
         edit_btn.clicked.connect(self.edit_period)
         btn_layout.addWidget(edit_btn)
 
-        delete_btn = create_button(
-            "\u274C 删除", btn_type="danger", min_width=100
-        )
+        delete_btn = create_button("\u274c 删除", btn_type="danger", min_width=100)
         delete_btn.clicked.connect(self.delete_period)
         btn_layout.addWidget(delete_btn)
 
         btn_layout.addStretch()
 
-        clear_btn = create_button(
-            "\U0001F5D1\ufe0f 清空所有", btn_type="gray", min_width=100
-        )
+        clear_btn = create_button("\U0001f5d1\ufe0f 清空所有", btn_type="gray", min_width=100)
         clear_btn.clicked.connect(self.clear_all)
         btn_layout.addWidget(clear_btn)
 
@@ -172,6 +167,7 @@ class BaseHolidayWidget(QWidget):
         end_date = self.end_edit.date().toString("yyyy-MM-dd")
 
         from infrastructure import parse_date_str
+
         start = parse_date_str(start_date)
         end = parse_date_str(end_date)
         if start > end:
@@ -239,7 +235,9 @@ class BaseHolidayWidget(QWidget):
     def clear_all(self) -> None:
         """清空所有节假日"""
         reply = QMessageBox.question(
-            self, "确认", "确定要清空所有节假日吗？",
+            self,
+            "确认",
+            "确定要清空所有节假日吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:

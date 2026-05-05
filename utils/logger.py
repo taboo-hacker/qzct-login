@@ -1,13 +1,15 @@
-import sys
 import os
+import sys
+
 from loguru import logger
-from PyQt5.QtCore import QObject, QMetaObject, Qt, QTimer
+from PyQt5.QtCore import QObject, QTimer
 
 
 class QtLogSink(QObject):
     """
     Loguru 自定义 Sink，将日志安全转发到 PyQt GUI 组件
     """
+
     _instance = None
     _pending_logs = []
     _flush_timer = None
@@ -52,7 +54,9 @@ class QtLogSink(QObject):
             QTimer.singleShot(0, cls._flush_pending_logs)
 
 
-def setup_logger(gui_widget=None, log_file=None, level="INFO", max_size="10 MB", retention="30 days"):
+def setup_logger(
+    gui_widget=None, log_file=None, level="INFO", max_size="10 MB", retention="30 days"
+):
     """
     配置 Loguru 日志系统
 
@@ -69,12 +73,7 @@ def setup_logger(gui_widget=None, log_file=None, level="INFO", max_size="10 MB",
 
     if gui_widget:
         QtLogSink.set_gui_widget(gui_widget)
-        logger.add(
-            QtLogSink._instance.write,
-            level=level,
-            format=log_format + "\n",
-            colorize=False
-        )
+        logger.add(QtLogSink._instance.write, level=level, format=log_format + "\n", colorize=False)
 
     if log_file:
         log_dir = os.path.dirname(log_file)
@@ -87,15 +86,10 @@ def setup_logger(gui_widget=None, log_file=None, level="INFO", max_size="10 MB",
             rotation=max_size,
             compression="zip",
             retention=retention,
-            encoding="utf-8"
+            encoding="utf-8",
         )
 
-    logger.add(
-        sys.stderr,
-        level=level,
-        format=log_format,
-        colorize=True
-    )
+    logger.add(sys.stderr, level=level, format=log_format, colorize=True)
 
     logger.info("日志系统初始化完成 [Loguru]")
     return logger

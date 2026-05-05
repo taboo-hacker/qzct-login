@@ -2,22 +2,30 @@
 关于对话框模块
 使用组件工厂和主题系统重构的关于对话框
 """
+
 from typing import Optional
 
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFrame, QGridLayout, QMessageBox,
-    QApplication,
-)
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
-from utils.version import get_project_version
 from gui.style_helpers import (
-    create_button, create_label, create_section_title,
-    create_card_widget, create_tip_label, create_header_widget,
+    create_button,
+    create_card_widget,
+    create_label,
+    create_section_title,
 )
 from gui.style_manager import StyleManager, ThemeManager
 from gui.styles import FontSize, FontStyle, StyleConstants
+from utils.version import get_project_version
 
 
 class AboutDialog(QDialog):
@@ -66,7 +74,7 @@ class AboutDialog(QDialog):
         top_layout.setContentsMargins(24, 24, 24, 24)
 
         # 应用图标
-        icon_label = QLabel("\U0001F310")
+        icon_label = QLabel("\U0001f310")
         icon_label.setFont(FontStyle.emoji(48))
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setObjectName("appIcon")
@@ -83,9 +91,7 @@ class AboutDialog(QDialog):
         top_layout.addWidget(title_label)
 
         # 版本号（可点击复制）
-        self.version_btn = create_button(
-            f"版本 {self.version}", btn_type="primary", font_size=10
-        )
+        self.version_btn = create_button(f"版本 {self.version}", btn_type="primary", font_size=10)
         self.version_btn.setObjectName("versionButton")
         self.version_btn.setToolTip("点击复制版本号")
         self.version_btn.clicked.connect(self._copy_version)
@@ -103,7 +109,7 @@ class AboutDialog(QDialog):
         info_layout.setContentsMargins(24, 16, 24, 16)
 
         # 描述标题
-        desc_title = create_section_title("\U0001F4D6 应用简介")
+        desc_title = create_section_title("\U0001f4d6 应用简介")
         desc_title.setObjectName("sectionTitle")
         info_layout.addWidget(desc_title)
 
@@ -136,11 +142,11 @@ class AboutDialog(QDialog):
 
         # 功能列表
         features = [
-            ("\U0001F510", "自动校园网登录", "支持移动、电信、联通运营商"),
-            ("\U0001F4F6", "智能WiFi连接", "自动检测并连接校园WiFi"),
-            ("\u23F0", "定时关机", "自动设置关机任务，节能环保"),
-            ("\U0001F4C5", "节假日同步", "同步国务院2025/2026节假日规则"),
-            ("\U0001F4CA", "运行日志", "实时记录程序运行状态"),
+            ("\U0001f510", "自动校园网登录", "支持移动、电信、联通运营商"),
+            ("\U0001f4f6", "智能WiFi连接", "自动检测并连接校园WiFi"),
+            ("\u23f0", "定时关机", "自动设置关机任务，节能环保"),
+            ("\U0001f4c5", "节假日同步", "同步国务院2025/2026节假日规则"),
+            ("\U0001f4ca", "运行日志", "实时记录程序运行状态"),
         ]
 
         grid_layout = QGridLayout()
@@ -162,9 +168,7 @@ class AboutDialog(QDialog):
             # 图标
             icon_label = QLabel(icon)
             icon_label.setFont(FontStyle.emoji(18))
-            icon_label.setAlignment(
-                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
-            )
+            icon_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
             icon_label.setFixedWidth(35)
             feature_layout.addWidget(icon_label)
 
@@ -178,9 +182,7 @@ class AboutDialog(QDialog):
 
             # 描述
             desc_label = create_label(desc, font_size=FontSize.CONTENT_SMALL)
-            desc_label.setStyleSheet(
-                f"color: {theme.text_secondary}; background: transparent;"
-            )
+            desc_label.setStyleSheet(f"color: {theme.text_secondary}; background: transparent;")
             desc_label.setWordWrap(True)
             text_layout.addWidget(desc_label)
 
@@ -204,11 +206,9 @@ class AboutDialog(QDialog):
         links_layout.setContentsMargins(24, 16, 24, 16)
 
         # GitHub 链接
-        github_label = create_label("\U0001F4BB GitHub", font_size=12, bold=True)
+        github_label = create_label("\U0001f4bb GitHub", font_size=12, bold=True)
 
-        github_link = QLabel(
-            '<a href="https://github.com/taboo-hacker">访问仓库</a>'
-        )
+        github_link = QLabel('<a href="https://github.com/taboo-hacker">访问仓库</a>')
         github_link.setFont(FontStyle.normal(FontSize.BUTTON_SECONDARY))
         github_link.setObjectName("linkLabel")
         github_link.setOpenExternalLinks(True)
@@ -233,7 +233,7 @@ class AboutDialog(QDialog):
 
         # 版权信息
         copyright_label = create_label(
-            "\u00A9 2026 校园网自动登录工具 \u00B7 All Rights Reserved",
+            "\u00a9 2026 校园网自动登录工具 \u00b7 All Rights Reserved",
             font_size=FontSize.COPYRIGHT,
         )
         copyright_label.setAlignment(Qt.AlignmentFlag.AlignCenter)

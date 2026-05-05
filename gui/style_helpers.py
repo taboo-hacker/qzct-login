@@ -2,16 +2,15 @@
 组件工厂和工具函数模块
 提供统一的组件创建接口，确保所有组件遵循统一的设计规范
 """
-from typing import Optional
-from PyQt5.QtWidgets import (
-    QPushButton, QFrame, QLabel, QVBoxLayout, QWidget, QTextEdit
-)
-from PyQt5.QtGui import QFont, QCursor
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 
+from typing import Optional
+
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QCursor, QFont
+from PyQt5.QtWidgets import QFrame, QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
+
+from gui.style_manager import StyleManager, ThemeManager
 from gui.styles import FontSize, FontStyle
-from gui.themes import ThemeColors
-from gui.style_manager import ThemeManager, StyleManager
 
 
 def create_button(
@@ -20,7 +19,7 @@ def create_button(
     min_width: Optional[int] = None,
     min_height: Optional[int] = None,
     font_size: Optional[int] = None,
-    icon: Optional[str] = None
+    icon: Optional[str] = None,
 ) -> QPushButton:
     btn = QPushButton(f"{icon} {text}" if icon else text)
     btn.setObjectName(f"{btn_type}Button")
@@ -42,11 +41,12 @@ def create_label(
     font_size: Optional[int] = None,
     bold: bool = False,
     color: Optional[str] = None,
-    word_wrap: bool = False
+    word_wrap: bool = False,
 ) -> QLabel:
     label = QLabel(text)
     label.setFont(
-        FontStyle.bold(font_size or FontSize.CONTENT_NORMAL) if bold
+        FontStyle.bold(font_size or FontSize.CONTENT_NORMAL)
+        if bold
         else FontStyle.normal(font_size or FontSize.CONTENT_NORMAL)
     )
 
@@ -62,10 +62,7 @@ def create_label(
 def create_section_title(title: str, icon: Optional[str] = None) -> QLabel:
     text = f"{icon} {title}" if icon else title
     theme = ThemeManager.current_theme()
-    label = create_label(
-        text, FontSize.SECTION_TITLE, bold=True,
-        color=theme.primary
-    )
+    label = create_label(text, FontSize.SECTION_TITLE, bold=True, color=theme.primary)
     return label
 
 
@@ -79,18 +76,13 @@ def create_tip_label(text: str) -> QLabel:
     theme = ThemeManager.current_theme()
     label = QLabel(text)
     label.setFont(FontStyle.normal(FontSize.TIP_TEXT))
-    label.setStyleSheet(
-        f"color: {theme.text_tertiary}; background: transparent;"
-    )
+    label.setStyleSheet(f"color: {theme.text_tertiary}; background: transparent;")
     label.setWordWrap(True)
     return label
 
 
 def create_header_widget(
-    title: str,
-    subtitle: Optional[str] = None,
-    icon: Optional[str] = None,
-    height: int = 100
+    title: str, subtitle: Optional[str] = None, icon: Optional[str] = None, height: int = 100
 ) -> QFrame:
     header_frame = QFrame()
     header_frame.setObjectName("headerFrame")
@@ -201,7 +193,7 @@ class EmptyState(QWidget):
         self,
         message: str = "暂无数据",
         icon: Optional[str] = None,
-        parent: Optional[QWidget] = None
+        parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._message = message
@@ -223,9 +215,7 @@ class EmptyState(QWidget):
         message_label.setFont(FontStyle.normal(FontSize.CONTENT_NORMAL))
         message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         theme = ThemeManager.current_theme()
-        message_label.setStyleSheet(
-            f"color: {theme.text_tertiary}; background: transparent;"
-        )
+        message_label.setStyleSheet(f"color: {theme.text_tertiary}; background: transparent;")
         layout.addWidget(message_label)
 
 

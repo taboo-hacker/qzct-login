@@ -2,18 +2,25 @@
 时间段编辑对话框模块
 使用组件工厂重构的编辑对话框
 """
+
 from typing import Optional
 
+from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QLabel, QFrame,
-    QDateEdit, QHBoxLayout, QPushButton, QMessageBox,
+    QDateEdit,
+    QDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QVBoxLayout,
 )
-from PyQt5.QtCore import QDate
 
+from gui.style_helpers import create_button, create_card_widget, create_label
+from gui.style_manager import StyleManager
+from gui.styles import FontSize
 from infrastructure import parse_date_str
-from gui.style_helpers import create_button, create_label, create_card_widget
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
 
 
 class PeriodEditDialog(QDialog):
@@ -45,7 +52,7 @@ class PeriodEditDialog(QDialog):
         header_layout = QVBoxLayout()
         header_layout.setContentsMargins(25, 20, 25, 15)
         title_label = create_label(
-            "\U0001F4C5 " + ("编辑时间段" if is_edit else "添加时间段"),
+            "\U0001f4c5 " + ("编辑时间段" if is_edit else "添加时间段"),
             font_size=FontSize.DIALOG_TITLE,
             bold=True,
         )
@@ -76,9 +83,7 @@ class PeriodEditDialog(QDialog):
         if self.period.get("start"):
             start_date = parse_date_str(self.period["start"])
             if start_date:
-                self.start_edit.setDate(
-                    QDate(start_date.year, start_date.month, start_date.day)
-                )
+                self.start_edit.setDate(QDate(start_date.year, start_date.month, start_date.day))
         else:
             self.start_edit.setDate(QDate.currentDate())
         form_layout.addRow(create_label("开始日期："), self.start_edit)
@@ -89,9 +94,7 @@ class PeriodEditDialog(QDialog):
         if self.period.get("end"):
             end_date = parse_date_str(self.period["end"])
             if end_date:
-                self.end_edit.setDate(
-                    QDate(end_date.year, end_date.month, end_date.day)
-                )
+                self.end_edit.setDate(QDate(end_date.year, end_date.month, end_date.day))
         else:
             self.end_edit.setDate(QDate.currentDate())
         form_layout.addRow(create_label("结束日期："), self.end_edit)
@@ -104,15 +107,11 @@ class PeriodEditDialog(QDialog):
         btn_layout.setSpacing(10)
         btn_layout.addStretch()
 
-        save_btn = create_button(
-            "\U0001F4BE 保存", btn_type="success", min_width=100, font_size=11
-        )
+        save_btn = create_button("\U0001f4be 保存", btn_type="success", min_width=100, font_size=11)
         save_btn.clicked.connect(self.save)
         btn_layout.addWidget(save_btn)
 
-        cancel_btn = create_button(
-            "\u274C 取消", btn_type="gray", min_width=100, font_size=11
-        )
+        cancel_btn = create_button("\u274c 取消", btn_type="gray", min_width=100, font_size=11)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 

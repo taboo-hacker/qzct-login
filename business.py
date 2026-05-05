@@ -1,20 +1,22 @@
-import os
-import time
-import re
-import json
-import requests
-import subprocess
 import datetime
+import json
+import os
+import re
+import subprocess
+import time
 import xml.sax.saxutils
+
+import requests
 from requests.exceptions import RequestException
-from system_core import global_config, ISP_MAPPING, should_work_today, get_config_snapshot
-from infrastructure import info, error
-from concurrency import task, TaskContext
+
+from concurrency import TaskContext, task
+from infrastructure import error, info
+from system_core import ISP_MAPPING, get_config_snapshot, should_work_today
 
 
 def _sanitize(msg: str) -> str:
     """移除日志中可能出现的密码明文"""
-    return re.sub(r'user_password=[^&]+', 'user_password=***', str(msg))
+    return re.sub(r"user_password=[^&]+", "user_password=***", str(msg))
 
 
 # ==========================================
@@ -52,18 +54,16 @@ def set_shutdown_timer(seconds: int):
 def is_wifi_connected(wifi_name: str) -> bool:
     """
     检查是否已连接到指定的WiFi网络
-    
+
     Args:
         wifi_name (str): 要检查的WiFi名称（SSID）
-    
+
     Returns:
         bool: True表示已连接，False表示未连接
     """
     try:
         result = subprocess.check_output(
-            ["netsh", "wlan", "show", "interfaces"],
-            encoding="gbk",
-            errors="ignore"
+            ["netsh", "wlan", "show", "interfaces"], encoding="gbk", errors="ignore"
         )
         return wifi_name in result
     except subprocess.CalledProcessError:
@@ -73,17 +73,17 @@ def is_wifi_connected(wifi_name: str) -> bool:
 def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
     """
     创建Windows WiFi配置文件（XML格式）
-    
+
     Args:
         wifi_name (str): WiFi网络名称（SSID）
         password (str): WiFi连接密码
-    
+
     Returns:
         str: XML格式的WiFi配置文件内容
     """
     escaped_wifi_name = xml.sax.saxutils.escape(wifi_name)
     escaped_password = xml.sax.saxutils.escape(password)
-    
+
     profile_xml = f"""<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
     <name>{escaped_wifi_name}</name>
@@ -118,18 +118,21 @@ def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
 def connect_wifi(wifi_name: str, password: str) -> bool:
     """
     连接到指定的WiFi网络
-    
+
     Args:
         wifi_name (str): WiFi网络名称
         password (str): WiFi密码
-    
+
     Returns:
         bool: True表示连接成功（或已连接），False表示连接失败
     """
     temp_file = None
     try:
         import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False, encoding='utf-8') as f:
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".xml", delete=False, encoding="utf-8"
+        ) as f:
             f.write(create_windows_wifi_profile(wifi_name, password))
             temp_file = f.name
 
@@ -139,7 +142,7 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
             ["netsh", "wlan", "add", "profile", f"filename={temp_file}", "user=all"],
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
 
         info("business", f"发起WiFi连接请求：{wifi_name}")
@@ -147,16 +150,16 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
             ["netsh", "wlan", "connect", "name=" + wifi_name],
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
 
         if temp_file and os.path.exists(temp_file):
             os.unlink(temp_file)
             info("business", f"清理临时配置文件：{temp_file}")
-        
+
         info("business", "等待WiFi连接稳定...")
         time.sleep(5)
-        
+
         connected = is_wifi_connected(wifi_name)
         if connected:
             info("business", f"WiFi连接成功：{wifi_name}")
@@ -228,11 +231,11 @@ def auto_connect_wifi(cfg=None):
 def parse_jsonp(jsonp_text: str, callback: str) -> dict:
     """
     解析JSONP格式的响应数据
-    
+
     Args:
         jsonp_text (str): JSONP格式的响应文本
         callback (str): JSONP回调函数名称，如 "dr1004"
-    
+
     Returns:
         dict: 解析后的字典数据
     """
@@ -270,7 +273,7 @@ def campus_login(cfg=None) -> bool:
         "wlan_ac_ip": "",
         "wlan_ac_name": "",
         "callback": "dr1004",
-        "v": "7213"
+        "v": "7213",
     }
 
     HEADERS = {
@@ -278,7 +281,7 @@ def campus_login(cfg=None) -> bool:
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
         "Connection": "keep-alive",
         "Referer": "http://192.168.51.2/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
     }
 
     # 校园网认证服务器通常使用自签名证书，无法验证链
@@ -300,29 +303,27 @@ def campus_login(cfg=None) -> bool:
             "jsVersion": "4.2.2",
             "terminal_type": "1",
             "lang": "zh",
-            "v": config["v"]
+            "v": config["v"],
         }
 
         info("business", f"开始发送登录请求到 {config['login_url']}")
-        
+
         response = session.get(
-            url=config["login_url"],
-            params=params,
-            headers=HEADERS,
-            verify=False,
-            timeout=15
+            url=config["login_url"], params=params, headers=HEADERS, verify=False, timeout=15
         )
         response.encoding = "utf-8"
 
         info("business", f"登录请求返回状态码：{response.status_code}")
 
         result = parse_jsonp(response.text, config["callback"])
-        
+
         if result.get("ret_code") == 0 or result.get("result") == 1:
             info("business", f"登录成功：{result.get('msg', '登录成功')}")
             return True
         else:
-            error("business", f"登录失败：{_sanitize(result.get('msg', '未知错误'))}", exc_info=False)
+            error(
+                "business", f"登录失败：{_sanitize(result.get('msg', '未知错误'))}", exc_info=False
+            )
             return False
 
     except RequestException as e:
@@ -345,7 +346,7 @@ def campus_login(cfg=None) -> bool:
 def run_tasks_once():
     """
     执行一次完整的自动化任务
-    
+
     执行以下步骤：
         1. 检查今天是否需要执行任务（根据日期规则）
         2. 连接WiFi网络（如果需要）
@@ -353,19 +354,19 @@ def run_tasks_once():
         4. 设置定时关机
     """
     info("business", "开始执行完整任务链")
-    
+
     today = datetime.date.today()
     info("business", f"当前日期：{today}")
-    
+
     info("business", "正在检查执行条件...")
     need_work = should_work_today()
-    
+
     if not need_work:
         info("business", "今天无需执行任务（节假日或周末）")
         return
-    
+
     info("business", "今天需要执行任务，开始执行流程")
-    
+
     info("business", "开始连接WiFi网络")
     wifi_connected = auto_connect_wifi()
     if wifi_connected:
@@ -380,30 +381,34 @@ def run_tasks_once():
         info("business", "校园网认证系统登录成功")
     except Exception as e:
         error("business", f"校园网登录异常：{e}")
-    
+
     info("business", "开始设置定时关机")
-    
+
     try:
         cfg = get_config_snapshot()
         shutdown_hour = cfg.get("SHUTDOWN_HOUR", 23)
         shutdown_min = cfg.get("SHUTDOWN_MIN", 0)
-        shutdown_time = datetime.datetime.combine(
-            today, datetime.time(shutdown_hour, shutdown_min)
-        )
+        shutdown_time = datetime.datetime.combine(today, datetime.time(shutdown_hour, shutdown_min))
         now = datetime.datetime.now()
-        
+
         if now >= shutdown_time:
-            info("business", f"当前时间已过今日关机时间（{shutdown_hour:02d}:{shutdown_min:02d}），不再设置关机")
+            info(
+                "business",
+                f"当前时间已过今日关机时间（{shutdown_hour:02d}:{shutdown_min:02d}），不再设置关机",
+            )
         else:
             seconds = int((shutdown_time - now).total_seconds())
             if seconds > 0:
                 set_shutdown_timer(seconds)
-                info("business", f"已设置定时关机，将在 {shutdown_hour:02d}:{shutdown_min:02d} 自动关机（{seconds}秒后）")
+                info(
+                    "business",
+                    f"已设置定时关机，将在 {shutdown_hour:02d}:{shutdown_min:02d} 自动关机（{seconds}秒后）",
+                )
             else:
                 error("business", "关机时间计算无效，无法设置关机", exc_info=False)
     except Exception as e:
         error("business", f"设置关机异常：{e}")
-    
+
     info("business", "完整任务链执行完成")
 
 
@@ -412,13 +417,13 @@ def task_check_condition(ctx: TaskContext, check_date=None) -> dict:
     ctx.log("正在检查执行条件...")
     today = check_date if check_date else datetime.date.today()
     ctx.log(f"当前日期：{today}")
-    
+
     need_work = should_work_today(today)
-    
+
     if not need_work:
         ctx.log("今天无需执行任务（节假日或周末）")
         return {"need_work": False, "date": today}
-    
+
     ctx.log("今天需要执行任务，开始执行流程")
     return {"need_work": True, "date": today}
 
@@ -461,21 +466,23 @@ def task_set_shutdown(ctx: TaskContext, check_date=None) -> dict:
     try:
         shutdown_hour = cfg.get("SHUTDOWN_HOUR", 23)
         shutdown_min = cfg.get("SHUTDOWN_MIN", 0)
-        
+
         today = check_date if check_date else datetime.date.today()
-        shutdown_time = datetime.datetime.combine(
-            today, datetime.time(shutdown_hour, shutdown_min)
-        )
+        shutdown_time = datetime.datetime.combine(today, datetime.time(shutdown_hour, shutdown_min))
         now = datetime.datetime.now()
-        
+
         if now >= shutdown_time:
-            ctx.log(f"当前时间已过今日关机时间（{shutdown_hour:02d}:{shutdown_min:02d}），不再设置关机")
+            ctx.log(
+                f"当前时间已过今日关机时间（{shutdown_hour:02d}:{shutdown_min:02d}），不再设置关机"
+            )
             return {"shutdown_set": False, "reason": "time_passed"}
         else:
             seconds = int((shutdown_time - now).total_seconds())
             if seconds > 0:
                 set_shutdown_timer(seconds)
-                ctx.log(f"已设置定时关机，将在 {shutdown_hour:02d}:{shutdown_min:02d} 自动关机（{seconds}秒后）")
+                ctx.log(
+                    f"已设置定时关机，将在 {shutdown_hour:02d}:{shutdown_min:02d} 自动关机（{seconds}秒后）"
+                )
                 ctx.set_progress(100)
                 return {"shutdown_set": True, "seconds": seconds}
             else:

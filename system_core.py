@@ -1,18 +1,18 @@
-import os
-import copy
-import json
 import base64
+import copy
 import datetime
+import json
+import os
 import threading
-from PyQt5.QtWidgets import QMessageBox, QInputDialog, QApplication, QLineEdit
+
 from cryptography.fernet import Fernet
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.backends import default_backend
 from lunar_python import Solar
+from PyQt5.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
 
-from infrastructure import info, error
-
+from infrastructure import error, info
 
 # ==========================================
 # 农历工具类
@@ -28,7 +28,7 @@ TRADITIONAL_FESTIVALS = {
     (9, 9): "重阳节",
     (12, 8): "腊八节",
     (12, 23): "小年",
-    (12, 30): "除夕"
+    (12, 30): "除夕",
 }
 
 SOLAR_FESTIVALS = {
@@ -40,26 +40,50 @@ SOLAR_FESTIVALS = {
     (6, 1): "儿童节",
     (7, 1): "建党节",
     (8, 1): "建军节",
-    (10, 1): "国庆节"
+    (10, 1): "国庆节",
 }
 
 
 def get_simplified_yi_ji(date):
     """
     获取简化版宜忌信息
-    
+
     Args:
         date (datetime.date): 公历日期
-        
+
     Returns:
         dict: 包含宜和忌的字典
     """
     year, month, day = date.year, date.month, date.day
     hash_val = year * 10000 + month * 100 + day
-    yi_options = ["嫁娶", "出行", "搬家", "开市", "安床", "祭祀", "祈福", "动土", "破土", "安葬", "开光"]
-    ji_options = ["嫁娶", "出行", "搬家", "开市", "安床", "祭祀", "祈福", "动土", "破土", "安葬", "开光"]
-    yi = yi_options[:hash_val % 5 + 1]
-    ji = [item for item in ji_options if item not in yi][:hash_val % 5 + 1]
+    yi_options = [
+        "嫁娶",
+        "出行",
+        "搬家",
+        "开市",
+        "安床",
+        "祭祀",
+        "祈福",
+        "动土",
+        "破土",
+        "安葬",
+        "开光",
+    ]
+    ji_options = [
+        "嫁娶",
+        "出行",
+        "搬家",
+        "开市",
+        "安床",
+        "祭祀",
+        "祈福",
+        "动土",
+        "破土",
+        "安葬",
+        "开光",
+    ]
+    yi = yi_options[: hash_val % 5 + 1]
+    ji = [item for item in ji_options if item not in yi][: hash_val % 5 + 1]
     return {"宜": yi, "忌": ji}
 
 
@@ -67,15 +91,15 @@ class LunarUtils:
     """
     农历工具类，提供完整的农历功能
     """
-    
+
     @staticmethod
     def solar_to_lunar(date):
         """
         公历转农历
-        
+
         Args:
             date (datetime.date): 公历日期
-            
+
         Returns:
             dict: 包含农历信息的字典
         """
@@ -88,13 +112,13 @@ class LunarUtils:
                 "lunar_day": lunar.getDay(),
                 "is_leap_month": lunar.getMonth() < 0,
                 "full_str": lunar.toString(),
-                "short_str": f"{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
+                "short_str": f"{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}",
             }
             return lunar_info
         except Exception as e:
             error("system_core", f"公历转农历失败：{e}")
             return None
-    
+
     @staticmethod
     def get_solar_term(date):
         """
@@ -115,15 +139,15 @@ class LunarUtils:
             return jie_qi if jie_qi else ""
         except Exception:
             return ""
-    
+
     @staticmethod
     def get_festivals(date):
         """
         获取指定日期的节日
-        
+
         Args:
             date (datetime.date): 公历日期
-            
+
         Returns:
             dict: 包含传统节日和公历节日的字典
         """
@@ -137,15 +161,15 @@ class LunarUtils:
             if lunar_key in TRADITIONAL_FESTIVALS:
                 festivals["traditional"].append(TRADITIONAL_FESTIVALS[lunar_key])
         return festivals
-    
+
     @staticmethod
     def get_yi_ji(date):
         """
         获取指定日期的宜忌信息
-        
+
         Args:
             date (datetime.date): 公历日期
-            
+
         Returns:
             dict: 包含宜和忌的字典
         """
@@ -158,15 +182,15 @@ class LunarUtils:
         except Exception as e:
             error("system_core", f"获取宜忌信息失败：{e}")
             return get_simplified_yi_ji(date)
-    
+
     @staticmethod
     def get_lunar_info(date):
         """
         获取完整的农历信息
-        
+
         Args:
             date (datetime.date): 公历日期
-            
+
         Returns:
             dict: 包含所有农历信息的字典
         """
@@ -179,7 +203,7 @@ class LunarUtils:
         lunar_info["festivals"] = festivals
         yi_ji = LunarUtils.get_yi_ji(date)
         lunar_info["yi_ji"] = yi_ji
-        
+
         try:
             solar = Solar.fromYmd(date.year, date.month, date.day)
             lunar = solar.getLunar()
@@ -190,7 +214,7 @@ class LunarUtils:
             lunar_info["jieqi"] = lunar.getJieQi()
         except Exception as e:
             error("system_core", f"获取干支生肖信息失败：{e}")
-        
+
         return lunar_info
 
 
@@ -214,6 +238,7 @@ def _get_config_dir():
 def _migrate_old_files(config_dir: str):
     """将旧工作目录中的加密密钥文件迁移到新位置"""
     import shutil
+
     old_files = ["encryption_key.key", "encryption_salt.key"]
     for filename in old_files:
         new_path = os.path.join(config_dir, filename)
@@ -229,7 +254,7 @@ MASTER_PASSWORD_KEY = "MASTER_PASSWORD"
 def load_salt():
     """
     加载盐值
-    
+
     Returns:
         bytes: 盐值
     """
@@ -247,11 +272,11 @@ def load_salt():
 def generate_derived_key_from_master_password(master_password, salt=None):
     """
     从主密码生成派生密钥
-    
+
     Args:
         master_password (str): 主密码
         salt (bytes, optional): 盐值
-        
+
     Returns:
         tuple: (key, salt) 生成的派生密钥和使用的盐值
     """
@@ -262,7 +287,7 @@ def generate_derived_key_from_master_password(master_password, salt=None):
         length=32,
         salt=salt,
         iterations=600000,
-        backend=default_backend()
+        backend=default_backend(),
     )
     key = base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
     return key, salt
@@ -271,7 +296,7 @@ def generate_derived_key_from_master_password(master_password, salt=None):
 def save_derived_key(key):
     """
     保存派生密钥
-    
+
     Args:
         key (bytes): 派生密钥
     """
@@ -283,7 +308,7 @@ def save_derived_key(key):
 def load_derived_key():
     """
     加载派生密钥
-    
+
     Returns:
         bytes: 派生密钥，如果文件不存在则返回None
     """
@@ -296,45 +321,42 @@ def load_derived_key():
 def prompt_for_master_password():
     """
     提示用户输入主密码
-    
+
     Returns:
         str: 主密码
     """
     app = QApplication.instance()
     if not app:
         app = QApplication([])
-    
+
     while True:
         password, ok = QInputDialog.getText(
-            None, 
-            "设置主密码", 
-            "请设置加密主密码（用于保护您的敏感信息）：", 
-            echo=QLineEdit.Password
+            None,
+            "设置主密码",
+            "请设置加密主密码（用于保护您的敏感信息）：",
+            echo=QLineEdit.Password,
         )
-        
+
         if not ok:
             info("system_core", "用户取消设置主密码，使用临时密码")
             return "temp_password"
-        
+
         if not password:
             QMessageBox.warning(None, "提示", "主密码不能为空，请重新输入：")
             continue
-        
+
         confirm_password, ok = QInputDialog.getText(
-            None, 
-            "确认主密码", 
-            "请再次输入主密码以确认：", 
-            echo=QLineEdit.Password
+            None, "确认主密码", "请再次输入主密码以确认：", echo=QLineEdit.Password
         )
-        
+
         if not ok:
             info("system_core", "用户取消确认主密码，使用临时密码")
             return "temp_password"
-        
+
         if password != confirm_password:
             QMessageBox.warning(None, "提示", "两次输入的密码不一致，请重新输入：")
             continue
-        
+
         info("system_core", "主密码设置成功")
         return password
 
@@ -342,40 +364,37 @@ def prompt_for_master_password():
 def prompt_for_verify_master_password():
     """
     提示用户输入主密码进行验证
-    
+
     Returns:
         str: 主密码
     """
     app = QApplication.instance()
     if not app:
         app = QApplication([])
-    
+
     while True:
         password, ok = QInputDialog.getText(
-            None, 
-            "验证主密码", 
-            "请输入主密码以验证身份：", 
-            echo=QLineEdit.Password
+            None, "验证主密码", "请输入主密码以验证身份：", echo=QLineEdit.Password
         )
-        
+
         if not ok:
             return None
-        
+
         if not password:
             QMessageBox.warning(None, "提示", "主密码不能为空，请重新输入：")
             continue
-        
+
         return password
 
 
 def encrypt_data(data, derived_key):
     """
     加密数据
-    
+
     Args:
         data (str): 要加密的数据
         derived_key (bytes): 派生密钥
-    
+
     Returns:
         str: 加密后的数据（base64编码）
     """
@@ -389,11 +408,11 @@ def encrypt_data(data, derived_key):
 def decrypt_data(encrypted_data, derived_key):
     """
     解密数据
-    
+
     Args:
         encrypted_data (str): 加密的数据（base64编码）
         derived_key (bytes): 派生密钥
-    
+
     Returns:
         str: 解密后的数据
     """
@@ -434,10 +453,10 @@ def is_encrypted(data) -> bool:
 def initialize_first_run(config):
     """
     首次运行初始化
-    
+
     Args:
         config (dict): 配置字典
-    
+
     Returns:
         tuple: (master_password, derived_key) 主密码和派生密钥
     """
@@ -453,20 +472,20 @@ def initialize_first_run(config):
 def load_and_decrypt_master_password(config):
     """
     加载并解密主密码
-    
+
     Args:
         config (dict): 配置字典
-    
+
     Returns:
         tuple: (master_password, old_derived_key) 主密码和旧的派生密钥
     """
     old_derived_key = load_derived_key()
     if old_derived_key is None:
         raise Exception("派生密钥文件不存在")
-    
+
     if MASTER_PASSWORD_KEY not in config:
         raise Exception("主密码配置项不存在")
-    
+
     encrypted_master_password = config[MASTER_PASSWORD_KEY]
     master_password = decrypt_data(encrypted_master_password, old_derived_key)
     return master_password, old_derived_key
@@ -475,10 +494,10 @@ def load_and_decrypt_master_password(config):
 def regenerate_derived_key(master_password):
     """
     重新生成派生密钥
-    
+
     Args:
         master_password (str): 主密码
-    
+
     Returns:
         bytes: 新的派生密钥
     """
@@ -491,14 +510,14 @@ def regenerate_derived_key(master_password):
 def reencrypt_sensitive_data(config, old_derived_key, new_derived_key):
     """
     重新加密敏感数据
-    
+
     Args:
         config (dict): 配置字典
         old_derived_key (bytes): 旧的派生密钥
         new_derived_key (bytes): 新的派生密钥
     """
     sensitive_fields = ["WIFI_PASSWORD", "PASSWORD", MASTER_PASSWORD_KEY]
-    
+
     for field in sensitive_fields:
         if field in config and config[field]:
             if is_encrypted(config[field]):
@@ -513,28 +532,28 @@ def reencrypt_sensitive_data(config, old_derived_key, new_derived_key):
 def load_and_update_encryption(config):
     """
     加载并更新加密系统
-    
+
     Args:
         config (dict): 配置字典
-    
+
     Returns:
         tuple: (master_password, new_derived_key) 主密码和新的派生密钥
     """
     old_derived_key = load_derived_key()
     if old_derived_key is None or MASTER_PASSWORD_KEY not in config:
         return initialize_first_run(config)
-    
+
     try:
         master_password, old_derived_key = load_and_decrypt_master_password(config)
         return master_password, old_derived_key
     except Exception as e:
         error("system_core", f"解密主密码失败：{e}")
         reply = QMessageBox.question(
-            None, 
-            "解密失败", 
+            None,
+            "解密失败",
             "主密码解密失败，是否重置主密码？\n\n注意：重置后所有已加密信息将无法恢复。",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
+            QMessageBox.Yes,
         )
         if reply == QMessageBox.Yes:
             return initialize_first_run(config)
@@ -591,33 +610,20 @@ DEFAULT_CONFIG = {
         "2026-02-28",
         "2026-05-09",
         "2026-09-20",
-        "2026-10-10"
+        "2026-10-10",
     ],
     "DATE_RULES": {
         "ENABLE_CUSTOM_RULE": False,
         "WEEKLY_EXECUTE_DAYS": [0, 1, 2, 3, 4],
         "CUSTOM_HOLIDAY_PERIODS": [],
-        "CUSTOM_WORKDAY_PERIODS": []
+        "CUSTOM_WORKDAY_PERIODS": [],
     },
-    "_DECRYPT_FAILED_FIELDS": []
+    "_DECRYPT_FAILED_FIELDS": [],
 }
 
-ISP_MAPPING = {
-    "cmcc": "@cmcc",
-    "telecom": "@telecom",
-    "unicom": "@unicom",
-    "local": "@local"
-}
+ISP_MAPPING = {"cmcc": "@cmcc", "telecom": "@telecom", "unicom": "@unicom", "local": "@local"}
 
-WEEKDAY_MAPPING = {
-    0: "周一",
-    1: "周二",
-    2: "周三",
-    3: "周四",
-    4: "周五",
-    5: "周六",
-    6: "周日"
-}
+WEEKDAY_MAPPING = {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五", 5: "周六", 6: "周日"}
 
 global_config = copy.deepcopy(DEFAULT_CONFIG)
 current_derived_key = None
@@ -650,7 +656,7 @@ def load_config():
         new_config = copy.deepcopy(DEFAULT_CONFIG)
 
         if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
                 loaded_config = json.load(f)
 
             for key, value in loaded_config.items():
@@ -713,8 +719,7 @@ def load_config():
         QMessageBox.warning(
             None,
             "配置加载失败",
-            f"配置文件加载失败，已恢复为默认设置：\n{e}\n\n"
-            f"请检查 {CONFIG_FILE} 文件是否损坏。"
+            f"配置文件加载失败，已恢复为默认设置：\n{e}\n\n" f"请检查 {CONFIG_FILE} 文件是否损坏。",
         )
 
 
@@ -756,11 +761,11 @@ def save_config():
 def change_master_password(old_password, new_password):
     """
     更改主密码
-    
+
     Args:
         old_password (str): 旧主密码
         new_password (str): 新主密码
-    
+
     Returns:
         bool: 是否成功
     """
@@ -770,9 +775,9 @@ def change_master_password(old_password, new_password):
         test_encrypted = encrypt_data("test", old_derived_key)
         if test_encrypted:
             decrypt_data(test_encrypted, old_derived_key)
-        
+
         new_derived_key, _ = generate_derived_key_from_master_password(new_password)
-        
+
         sensitive_fields = ["WIFI_PASSWORD", "PASSWORD", MASTER_PASSWORD_KEY]
         for field in sensitive_fields:
             if field in global_config and global_config[field]:
@@ -784,7 +789,7 @@ def change_master_password(old_password, new_password):
                 else:
                     decrypted = global_config[field]
                 global_config[field] = encrypt_data(decrypted, new_derived_key)
-        
+
         global_config[MASTER_PASSWORD_KEY] = encrypt_data(new_password, new_derived_key)
         save_derived_key(new_derived_key)
         current_derived_key = new_derived_key
@@ -802,19 +807,23 @@ def change_master_password(old_password, new_password):
 def should_work_today(check_date=None):
     """
     判断指定日期是否需要执行自动化任务
-    
+
     Args:
         check_date (datetime.date, optional): 要检查的日期，默认为今天
-    
+
     Returns:
         bool: True表示需要执行任务，False表示不需要执行
     """
-    from infrastructure import parse_date_str, is_date_in_period
-    
+    from infrastructure import is_date_in_period, parse_date_str
+
     today = check_date if check_date is not None else datetime.date.today()
     date_rules = global_config.get("DATE_RULES", DEFAULT_CONFIG["DATE_RULES"])
 
-    compensatory_days = [parse_date_str(d) for d in global_config.get("COMPENSATORY_WORKDAYS", []) if parse_date_str(d)]
+    compensatory_days = [
+        parse_date_str(d)
+        for d in global_config.get("COMPENSATORY_WORKDAYS", [])
+        if parse_date_str(d)
+    ]
     if today in compensatory_days:
         return True
 

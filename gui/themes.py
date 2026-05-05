@@ -2,13 +2,15 @@
 主题系统模块
 定义亮色和暗色主题的配色方案，提供统一的主题变量
 """
+
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict
 
 
 @dataclass
 class ThemeColors:
     """主题配色数据类"""
+
     name: str
 
     primary: str = "#2563EB"
@@ -72,44 +74,34 @@ def create_light_theme() -> ThemeColors:
         primary_darkest="#1E40AF",
         primary_light="#60A5FA",
         primary_bg="#DBEAFE",
-
         success="#10B981",
         success_hover="#059669",
         success_bg="#D1FAE5",
-
         warning="#F59E0B",
         warning_hover="#D97706",
         warning_bg="#FEF3C7",
-
         danger="#EF4444",
         danger_hover="#DC2626",
         danger_darkest="#B91C1C",
         danger_bg="#FEE2E2",
-
         info="#3B82F6",
         info_hover="#2563EB",
-
         gray="#94A3B8",
         gray_hover="#64748B",
         gray_dark="#475569",
-
         background="#F0F2F5",
         background_secondary="#E2E8F0",
         surface="#FFFFFF",
         surface_variant="#F8FAFC",
-
         text_primary="#1E293B",
         text_secondary="#64748B",
         text_tertiary="#94A3B8",
         text_disabled="#CBD5E1",
         text_inverse="#FFFFFF",
-
         border="#CBD5E1",
         border_focus="#2563EB",
-
         shadow="rgba(0,0,0,0.06)",
         shadow_heavy="rgba(0,0,0,0.1)",
-
         log_debug="#94A3B8",
         log_info="#1E293B",
         log_warning="#F59E0B",
@@ -127,44 +119,34 @@ def create_dark_theme() -> ThemeColors:
         primary_darkest="#2563EB",
         primary_light="#93C5FD",
         primary_bg="#1E293B",
-
         success="#34D399",
         success_hover="#10B981",
         success_bg="#064E3B",
-
         warning="#FBBF24",
         warning_hover="#F59E0B",
         warning_bg="#78350F",
-
         danger="#F87171",
         danger_hover="#EF4444",
         danger_darkest="#DC2626",
         danger_bg="#7F1D1D",
-
         info="#60A5FA",
         info_hover="#3B82F6",
-
         gray="#64748B",
         gray_hover="#94A3B8",
         gray_dark="#CBD5E1",
-
         background="#0F172A",
         background_secondary="#1E293B",
         surface="#1E293B",
         surface_variant="#334155",
-
         text_primary="#F1F5F9",
         text_secondary="#94A3B8",
         text_tertiary="#64748B",
         text_disabled="#475569",
         text_inverse="#0F172A",
-
         border="#334155",
         border_focus="#60A5FA",
-
         shadow="rgba(0,0,0,0.3)",
         shadow_heavy="rgba(0,0,0,0.5)",
-
         log_debug="#64748B",
         log_info="#F1F5F9",
         log_warning="#FBBF24",

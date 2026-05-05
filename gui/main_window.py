@@ -2,41 +2,54 @@
 主窗口模块
 现代卡片式设计 - 浅灰背景 + 纯白卡片 + 圆角胶囊按钮
 """
+
 import datetime
 import sys
 from typing import Optional
 
+from PyQt5.QtCore import QPoint, QRectF, Qt, QTimer
+from PyQt5.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPainterPath
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QFrame, QMessageBox, QLabel, QPushButton, QMenu,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPoint, QRectF
-from PyQt5.QtGui import QMouseEvent, QPainter, QPainterPath, QColor, QCursor
-from gui.style_manager import ThemeManager
 
-from infrastructure import (
-    Logger, logger, StreamRedirector, info, debug, warning,
-    error, critical, init_logger, parse_date_str,
-)
-from system_core import load_config, global_config, should_work_today
 from business import (
-    run_tasks_once, cancel_shutdown, is_wifi_connected,
-    connect_wifi, campus_login,
+    campus_login,
+    cancel_shutdown,
+    connect_wifi,
+    is_wifi_connected,
+    task_campus_login,
+    task_check_condition,
+    task_connect_wifi,
+    task_set_shutdown,
 )
-from infrastructure import get_thread_pool_manager
 from concurrency import TaskChain, TaskExecutor
-from business import (
-    task_check_condition, task_connect_wifi,
-    task_campus_login, task_set_shutdown,
-)
-from utils.version import get_project_version
-from gui.dialogs import SettingsDialog, AboutDialog, CalendarDialog
+from gui.dialogs import AboutDialog, CalendarDialog, SettingsDialog
 from gui.style_helpers import (
-    create_button, create_label, create_header_widget,
-    create_card_widget, create_tip_label, LogTextEdit, BaseWidget,
+    LogTextEdit,
+    create_button,
+    create_label,
 )
 from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
+from gui.styles import FontSize, FontStyle
+from infrastructure import (
+    StreamRedirector,
+    error,
+    get_thread_pool_manager,
+    info,
+    init_logger,
+    parse_date_str,
+)
+from system_core import global_config, load_config, should_work_today
+from utils.version import get_project_version
 
 
 class TitleMenuBar(QFrame):
@@ -259,9 +272,7 @@ class MainWindow(QMainWindow):
         self.date_label = create_label("", font_size=14)
         left_layout.addWidget(self.date_label)
 
-        self.status_label = create_label(
-            "", font_size=14
-        )
+        self.status_label = create_label("", font_size=14)
         left_layout.addWidget(self.status_label)
 
         info_grid.addLayout(left_layout, 1)
@@ -271,14 +282,10 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout()
         right_layout.setSpacing(6)
 
-        self.rule_label = create_label(
-            "", font_size=14, color=theme.text_secondary
-        )
+        self.rule_label = create_label("", font_size=14, color=theme.text_secondary)
         right_layout.addWidget(self.rule_label)
 
-        self.time_label = create_label(
-            "", font_size=14, color=theme.text_secondary
-        )
+        self.time_label = create_label("", font_size=14, color=theme.text_secondary)
         right_layout.addWidget(self.time_label)
 
         info_grid.addLayout(right_layout, 1)
@@ -311,7 +318,8 @@ class MainWindow(QMainWindow):
             path = QPainterPath()
             path.addRoundedRect(
                 content_rect.adjusted(-offset, -offset, offset, offset),
-                self._corner_radius, self._corner_radius,
+                self._corner_radius,
+                self._corner_radius,
             )
             painter.fillPath(path, QColor(0, 0, 0, alpha))
 
@@ -329,7 +337,10 @@ class MainWindow(QMainWindow):
             widget = self.childAt(event.pos())
             if widget and (
                 widget.objectName() in ("titleMenuBar", "contentArea")
-                or (widget.parent() and widget.parent().objectName() in ("titleMenuBar", "contentArea"))
+                or (
+                    widget.parent()
+                    and widget.parent().objectName() in ("titleMenuBar", "contentArea")
+                )
             ):
                 self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
                 event.accept()
@@ -409,7 +420,9 @@ class MainWindow(QMainWindow):
         self.run_btn.clicked.connect(self.on_run_once)
         combined_layout.addWidget(self.run_btn)
 
-        self.cancel_btn = create_button("取消关机", btn_type="outline_danger", min_width=100, font_size=12)
+        self.cancel_btn = create_button(
+            "取消关机", btn_type="outline_danger", min_width=100, font_size=12
+        )
         self.cancel_btn.setToolTip("取消已设置的关机任务")
         self.cancel_btn.clicked.connect(self.on_cancel_shutdown)
         combined_layout.addWidget(self.cancel_btn)
@@ -558,9 +571,7 @@ class MainWindow(QMainWindow):
     def on_run_once(self) -> None:
         """手动执行一次完整任务"""
         if (
-            QMessageBox.question(
-                self, "确认", "是否立即执行一次完整任务（WiFi+登录+关机）？"
-            )
+            QMessageBox.question(self, "确认", "是否立即执行一次完整任务（WiFi+登录+关机）？")
             == QMessageBox.StandardButton.Yes
         ):
             info("main", "用户手动触发：开始执行完整任务链")
@@ -569,9 +580,7 @@ class MainWindow(QMainWindow):
     def on_cancel_shutdown(self) -> None:
         """取消关机任务"""
         if (
-            QMessageBox.question(
-                self, "确认", "是否取消已设置的关机任务？"
-            )
+            QMessageBox.question(self, "确认", "是否取消已设置的关机任务？")
             == QMessageBox.StandardButton.Yes
         ):
             cancel_shutdown()
@@ -583,15 +592,11 @@ class MainWindow(QMainWindow):
         """测试 WiFi 连接"""
         wifi_name = global_config.get("WIFI_NAME", "")
         if not wifi_name:
-            QMessageBox.warning(
-                self, "提示", "请先在设置中配置 WiFi 名称"
-            )
+            QMessageBox.warning(self, "提示", "请先在设置中配置 WiFi 名称")
             return
 
         if (
-            QMessageBox.question(
-                self, "确认", f"是否测试连接 WiFi：{wifi_name}？"
-            )
+            QMessageBox.question(self, "确认", f"是否测试连接 WiFi：{wifi_name}？")
             != QMessageBox.StandardButton.Yes
         ):
             return
@@ -602,18 +607,12 @@ class MainWindow(QMainWindow):
         if is_wifi_connected(wifi_name):
             info("main", f"已成功连接到 WiFi：{wifi_name}")
             self.footer_status.setText("WiFi 已连接")
-            QMessageBox.information(
-                self, "测试结果", f"已成功连接到 WiFi：{wifi_name}"
-            )
+            QMessageBox.information(self, "测试结果", f"已成功连接到 WiFi：{wifi_name}")
         else:
             info("main", "WiFi 未连接，尝试建立连接...")
-            if connect_wifi(
-                wifi_name, global_config.get("WIFI_PASSWORD", "")
-            ):
+            if connect_wifi(wifi_name, global_config.get("WIFI_PASSWORD", "")):
                 self.footer_status.setText("正在建立 WiFi 连接...")
-                QTimer.singleShot(
-                    3000, lambda: self._check_wifi_result(wifi_name)
-                )
+                QTimer.singleShot(3000, lambda: self._check_wifi_result(wifi_name))
             else:
                 error("main", "WiFi 连接命令执行失败", exc_info=False)
                 self.footer_status.setText("WiFi 连接失败")
@@ -628,9 +627,7 @@ class MainWindow(QMainWindow):
         if is_wifi_connected(wifi_name):
             info("main", f"WiFi 连接成功：{wifi_name}")
             self.footer_status.setText("WiFi 连接成功")
-            QMessageBox.information(
-                self, "测试结果", f"WiFi 连接成功：{wifi_name}"
-            )
+            QMessageBox.information(self, "测试结果", f"WiFi 连接成功：{wifi_name}")
         else:
             error("main", f"WiFi 连接失败：{wifi_name}", exc_info=False)
             self.footer_status.setText("WiFi 连接失败")
@@ -648,9 +645,7 @@ class MainWindow(QMainWindow):
         """测试校园网登录"""
         username = global_config.get("USERNAME", "")
         if not username:
-            QMessageBox.warning(
-                self, "提示", "请先在设置中配置校园网账号"
-            )
+            QMessageBox.warning(self, "提示", "请先在设置中配置校园网账号")
             return
 
         if (
@@ -672,9 +667,7 @@ class MainWindow(QMainWindow):
             )
         except Exception as e:
             self.footer_status.setText("登录测试失败")
-            QMessageBox.critical(
-                self, "错误", f"校园网登录测试失败：{str(e)}"
-            )
+            QMessageBox.critical(self, "错误", f"校园网登录测试失败：{str(e)}")
 
     def on_settings(self) -> None:
         """打开设置窗口"""
@@ -707,9 +700,7 @@ class MainWindow(QMainWindow):
 
         work_status = "需要联网并关机" if need_work else "不执行任何操作"
 
-        self.date_label.setText(
-            f"当前日期：{today}（{today.strftime('%A')}）"
-        )
+        self.date_label.setText(f"当前日期：{today}（{today.strftime('%A')}）")
         self.status_label.setText(f"今天状态：{work_status}")
         self.rule_label.setText(f"规则来源：{rule_source}")
         self.time_label.setText(

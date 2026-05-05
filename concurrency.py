@@ -1,11 +1,12 @@
-import os
-import time
 import functools
 import logging
+import os
 import queue
-from typing import Any, Callable, Optional, List, Dict
-from concurrent.futures import ThreadPoolExecutor, Future
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Callable, Dict, List, Optional
+
+from PyQt5.QtCore import QObject, QTimer, pyqtSignal
 
 
 class _TaskMessage:
@@ -51,7 +52,7 @@ class TaskExecutor(QObject):
         if max_workers is None:
             cpu_count = os.cpu_count() or 4
             max_workers = min(cpu_count * 4, 16)
-        
+
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._max_workers = max_workers
         self._tasks: Dict[str, Future] = {}
@@ -61,9 +62,9 @@ class TaskExecutor(QObject):
         self._chain_tasks: List[Dict] = []
         self._chain_results: Dict = {}
         self._chain_on_complete: Optional[Callable] = None
-        
+
         self._message_queue: queue.Queue = queue.Queue()
-        
+
         self._poll_timer = QTimer(self)
         self._poll_timer.setSingleShot(False)
         self._poll_timer.setInterval(50)
@@ -83,10 +84,11 @@ class TaskExecutor(QObject):
                 msg = self._message_queue.get_nowait()
             except queue.Empty:
                 break
-            
+
             if msg.msg_type == "log":
                 try:
                     from infrastructure import info
+
                     info("concurrency", f"[{msg.task_name}] {msg.data}")
                 except Exception:
                     logging.info(f"[{msg.task_name}] {msg.data}")
@@ -107,10 +109,10 @@ class TaskExecutor(QObject):
 
     def submit(self, func: Callable, task_name: str = "Unknown", *args, **kwargs) -> Future:
         self.started.emit(task_name)
-        
+
         ctx = TaskContext(task_name)
         self._contexts[task_name] = ctx
-        
+
         def wrapped():
             try:
                 result = func(ctx, *args, **kwargs)
@@ -120,7 +122,7 @@ class TaskExecutor(QObject):
 
         future = self._executor.submit(wrapped)
         self._tasks[task_name] = future
-        
+
         return future
 
     def submit_chain(self, tasks: List[Dict], on_complete: Optional[Callable] = None):
@@ -128,7 +130,7 @@ class TaskExecutor(QObject):
         self._chain_tasks = tasks
         self._chain_results = {}
         self._chain_on_complete = on_complete
-        
+
         self._execute_chain_next()
 
     def _execute_chain_next(self):
@@ -139,11 +141,11 @@ class TaskExecutor(QObject):
             return
 
         task_info = self._chain_tasks[self._chain_index]
-        func = task_info['func']
-        task_name = task_info.get('name', f"Task-{self._chain_index}")
-        args = task_info.get('args', ())
-        kwargs = task_info.get('kwargs', {})
-        
+        func = task_info["func"]
+        task_name = task_info.get("name", f"Task-{self._chain_index}")
+        args = task_info.get("args", ())
+        kwargs = task_info.get("kwargs", {})
+
         self.submit(func, task_name, *args, **kwargs)
 
     def _on_chain_task_finished(self, task_name: str, result):
@@ -152,7 +154,7 @@ class TaskExecutor(QObject):
         self._execute_chain_next()
 
     def _on_chain_task_error(self, task_name: str, error_msg: str):
-        self._chain_results[task_name] = {'error': error_msg}
+        self._chain_results[task_name] = {"error": error_msg}
         self._chain_index += 1
         self._execute_chain_next()
 
@@ -167,7 +169,7 @@ class TaskExecutor(QObject):
                 results[task_name] = result
                 self._enqueue(_TaskMessage("finished", task_name, result))
             except Exception as e:
-                results[task_name] = {'error': str(e)}
+                results[task_name] = {"error": str(e)}
                 self._enqueue(_TaskMessage("error", task_name, str(e)))
             finally:
                 completed_count[0] += 1
@@ -177,10 +179,10 @@ class TaskExecutor(QObject):
                     self._enqueue(_TaskMessage("all_finished", "", not self._cancelled))
 
         for i, task_info in enumerate(tasks):
-            func = task_info['func']
-            task_name = task_info.get('name', f"Parallel-Task-{i}")
-            args = task_info.get('args', ())
-            kwargs = task_info.get('kwargs', {})
+            func = task_info["func"]
+            task_name = task_info.get("name", f"Parallel-Task-{i}")
+            args = task_info.get("args", ())
+            kwargs = task_info.get("kwargs", {})
 
             ctx = TaskContext(task_name)
             self._contexts[task_name] = ctx
@@ -197,12 +199,13 @@ class TaskExecutor(QObject):
         self._cancelled = True
         for name, ctx in self._contexts.items():
             ctx.cancel()
-        
+
         for name, future in self._tasks.items():
             future.cancel()
 
     def wait_for_all(self, timeout: Optional[float] = None) -> bool:
-        from concurrent.futures import wait, ALL_COMPLETED
+        from concurrent.futures import ALL_COMPLETED, wait
+
         done, not_done = wait(self._tasks.values(), timeout=timeout, return_when=ALL_COMPLETED)
         return len(not_done) == 0
 
@@ -220,22 +223,24 @@ def task(name: str, timeout: Optional[float] = None):
         def wrapper(ctx: TaskContext, *args, **kwargs):
             start_time = time.time()
             ctx.log(f"任务开始: {name}")
-            
+
             try:
                 result = func(ctx, *args, **kwargs)
-                
+
                 elapsed = time.time() - start_time
                 ctx.log(f"任务完成: {name} (耗时: {elapsed:.2f}s)")
-                
+
                 return result
             except Exception as e:
                 elapsed = time.time() - start_time
                 ctx.log(f"任务失败: {name} (耗时: {elapsed:.2f}s, 错误: {str(e)})")
                 raise
+
         wrapper.task_name = name
         wrapper.timeout = timeout
         _task_registry[name] = wrapper
         return wrapper
+
     return decorator
 
 
@@ -257,13 +262,8 @@ class TaskChain:
         self._connections: list = []
 
     def add(self, func: Callable, name: str = None, *args, **kwargs):
-        task_name = name or getattr(func, 'task_name', f"Step-{len(self._steps)}")
-        self._steps.append({
-            'func': func,
-            'name': task_name,
-            'args': args,
-            'kwargs': kwargs
-        })
+        task_name = name or getattr(func, "task_name", f"Step-{len(self._steps)}")
+        self._steps.append({"func": func, "name": task_name, "args": args, "kwargs": kwargs})
         return self
 
     def on_success(self, callback: Callable):
@@ -274,7 +274,7 @@ class TaskChain:
         self._on_error_callback = callback
         return self
 
-    def execute(self, executor: Optional['TaskExecutor'] = None):
+    def execute(self, executor: Optional["TaskExecutor"] = None):
         if not self._steps:
             if self._on_success_callback:
                 self._on_success_callback(True, {})
@@ -284,7 +284,7 @@ class TaskChain:
             self._executor = executor
         else:
             self._executor = TaskExecutor()
-        
+
         self._disconnect_signals()
 
         def on_complete(success, results):
@@ -303,12 +303,8 @@ class TaskChain:
         self._executor._chain_index = 0
         self._executor._chain_results = {}
 
-        conn1 = self._executor.finished.connect(
-            self._executor._on_chain_task_finished
-        )
-        conn2 = self._executor.error.connect(
-            self._executor._on_chain_task_error
-        )
+        conn1 = self._executor.finished.connect(self._executor._on_chain_task_finished)
+        conn2 = self._executor.error.connect(self._executor._on_chain_task_error)
         self._connections = [conn1, conn2]
 
         self._executor._execute_chain_next()

@@ -4,8 +4,13 @@
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
 [![Version: 1.1.0](https://img.shields.io/badge/Version-1.1.0-blue.svg)](pyproject.toml)
-[![Python: 3.8+](https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg)](requirements.txt)
+[![Python: 3.8+](https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
+
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
+[![Checked with mypy](https://img.shields.io/badge/mypy-checked-blue.svg)](http://mypy-lang.org/)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 ## 📖 简介
 
@@ -33,97 +38,117 @@ QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的
 | requests | 网络请求 |
 | cryptography | 密码加密 |
 | lunar-python | 农历日期处理 |
+| loguru | 日志系统 |
 
 ## 🚀 快速开始
 
+### 安装
+
 ```bash
+# 克隆仓库
 git clone https://github.com/taboo-hacker/qzct-login.git
 cd qzct-login
-pip install -r requirements.txt
+
+# 安装依赖
+pip install -e ".[dev]"
+
+# 运行程序
 python main.py
+```
+
+### 开发
+
+```bash
+# 安装开发依赖
+pip install -e ".[dev]"
+
+# 运行测试
+pytest tests/ -v
+
+# 代码格式化
+black . && isort .
+
+# 代码检查
+ruff check .
+
+# 类型检查
+mypy .
 ```
 
 ## 📁 项目结构
 
 ```
 qzct-login/
-├── main.py                     # 主窗口程序（GUI + 主逻辑）
-├── business.py                  # 业务逻辑（WiFi、登录、关机）
-├── system_core.py               # 系统核心（配置、加密、日期、农历）
-├── infrastructure.py             # 基础设施（日志、线程池、工具）
-├── concurrency.py               # 并发框架（TaskChain 任务链 + TaskExecutor）
+├── main.py                     # 程序入口
+├── business.py                 # 业务逻辑（WiFi、登录、关机）
+├── system_core.py              # 系统核心（配置、加密、日期、农历）
+├── infrastructure.py           # 基础设施（日志、线程池、工具）
+├── concurrency.py              # 并发框架（TaskChain + TaskExecutor）
+├── constants.py                # 常量配置
+├── exceptions.py               # 自定义异常
 ├── gui/
-│   ├── main_window.py           # 主窗口（无边框、三区布局、拖拽）
-│   ├── style_manager.py         # QSS 样式表生成器
-│   ├── style_helpers.py         # UI 组件工厂函数
-│   ├── styles.py                # 字体 / 间距 / 圆角常量
-│   ├── themes.py                # 亮色 / 暗色主题配色
-│   ├── dialogs/
-│   │   ├── settings_dialog.py   # 配置设置（WiFi / 登录 / 关机 / 日期）
-│   │   ├── about_dialog.py      # 关于页面
-│   │   ├── calendar_dialog.py   # 万年历
-│   │   ├── password_dialog.py   # 更改主密码
-│   │   └── period_edit_dialog.py# 时间段编辑
-│   └── widgets/
-│       ├── date_rule_widget.py  # 自定义日期规则
-│       ├── compensatory_widget.py# 调休上班日管理
-│       └── holiday_widget.py    # 基础节假日管理
+│   ├── main_window.py          # 主窗口
+│   ├── style_manager.py        # QSS 样式管理器
+│   ├── dialogs/                # 对话框模块
+│   └── widgets/                # 自定义组件
 ├── utils/
-│   ├── version.py               # 版本号读取
-│   └── logger.py                # 日志工具
-├── config.json                   # 配置文件（自动生成）
-├── requirements.txt              # 项目依赖
-├── pyproject.toml                # 项目配置
-├── README.md                     # 项目说明
-└── LICENSE                       # 许可证
+│   ├── version.py              # 版本管理
+│   └── logger.py               # 日志工具
+├── tests/                      # 测试模块
+│   ├── conftest.py             # 测试配置
+│   ├── test_system_core.py     # 系统核心测试
+│   ├── test_business.py        # 业务逻辑测试
+│   ├── test_infrastructure.py  # 基础设施测试
+│   └── test_concurrency.py     # 并发框架测试
+├── .github/
+│   ├── workflows/              # GitHub Actions
+│   └── ISSUE_TEMPLATE/         # Issue 模板
+├── pyproject.toml              # 项目配置
+├── README.md                   # 项目说明
+├── DEVELOPING.md               # 开发指南
+├── CONTRIBUTING.md             # 贡献指南
+├── CODE_WIKI.md                # 代码 Wiki
+└── LICENSE                     # 许可证
 ```
+
+## 📚 文档
+
+- [开发指南](DEVELOPING.md) - 如何参与项目开发
+- [贡献指南](CONTRIBUTING.md) - 如何贡献代码
+- [代码 Wiki](CODE_WIKI.md) - 项目架构和 API 文档
 
 ## 🔄 更新日志
 
+### v1.2.0 (2026-05-05)
+
+- ✨ 新增测试框架和单元测试
+- ✨ 新增 CI/CD 配置（GitHub Actions）
+- ✨ 新增常量配置模块（constants.py）
+- ✨ 新增自定义异常模块（exceptions.py）
+- 🔧 完善类型提示
+- 🔧 更新 pyproject.toml 配置
+- 📝 新增开发指南和贡献指南
+- 📝 新增 Issue 和 PR 模板
+
 ### v1.1.0 (2026-04-28)
 
-- ✨ 新增完整的 GUI 系统，包含主窗口、对话框、自定义组件
-- ✨ 新增多线程并发框架 (TaskChain, TaskExecutor)
-- ✨ 新增工具模块 (utils/)，包含版本管理和日志工具
-- 🔧 大幅重构 main.py，代码精简
-- 🔧 重构 infrastructure.py，基础设施优化
-- 📦 更新依赖项和项目配置
-- 📝 更新 .gitignore，添加 .trae/ 目录
-
-### v1.0.3 (2026-04-26)
-
-- 🎨 极简商务风 UI 重构 — 无边框圆角窗口、自定义阴影、流畅拖动体验
-- 🧹 代码审查与重构 — 通过 Claude Code + DeepSeek V4 Pro 修复 8 个 Bug
-  - 修复节假日字段名不一致导致判断失效
-  - 修复 DateRuleWidget 保存逻辑缺失
-  - 修复 WiFi 连接判断逻辑漏洞
-  - 清理约 530 行废弃的死代码
-  - 修复硬编码文件路径问题
-  - 修复 submit_parallel 信号连接泄漏
-- 📝 更新项目结构 — 四个核心模块文件
-- 📝 README 优化 — 精简结构，对齐 GitHub Profile 风格
-
-### v1.0.2 (2026-04-05)
-
-- 🔧 重构项目结构 — 将多个模块融合为 4 个核心文件
-- 🔧 修复重复日志输出 — 统一通过信号发送日志
-- 🔧 修复配置设置崩溃 — 移除对已删除文件的依赖
-- 📝 配置按钮中文化 — 保存和取消按钮改为中文
-- 📝 更新日志模块名 — 统一使用新文件名作为日志标识
-- 🧹 优化关于我们的 UI
-
-### v1.0.1 (2026-04-05)
-
-- 🔧 重写加密解密逻辑 — 提升安全性
+- ✨ 新增完整的 GUI 系统
+- ✨ 新增多线程并发框架
+- ✨ 新增工具模块
+- 🔧 大幅重构代码
 
 ### v1.0.0 (2026-04-05)
 
 - 🎉 初始版本发布
-- ✅ WiFi 自动连接与校园网登录
-- ✅ 定时关机功能
-- ✅ 主密码加密保护
-- ✅ 图形化配置界面
+
+## 🤝 贡献
+
+欢迎贡献代码！请查看 [贡献指南](CONTRIBUTING.md) 了解详情。
 
 ## 📄 许可证
 
-本项目采用 CC BY-NC-SA 4.0 许可协议。
+本项目采用 [CC BY-NC-SA 4.0](LICENSE) 许可协议。
+
+---
+
+Made with ❤️ by QZCT Developer

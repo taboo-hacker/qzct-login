@@ -2,10 +2,12 @@
 样式管理器模块
 集中生成和管理所有 QSS 样式表，避免样式分散
 """
+
 from typing import Optional
+
 from PyQt5.QtWidgets import QWidget
 
-from gui.themes import ThemeColors, BUILTIN_THEMES
+from gui.themes import BUILTIN_THEMES, ThemeColors
 
 
 class ThemeManager:
@@ -70,6 +72,7 @@ class ThemeManager:
         if theme_name:
             cls.set_theme(theme_name)
         from gui.style_manager import StyleManager
+
         qss = StyleManager.get_global_stylesheet()
         widget.setStyleSheet(qss)
 

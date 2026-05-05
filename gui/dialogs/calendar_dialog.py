@@ -2,25 +2,33 @@
 日历对话框模块
 使用主题系统重构的万年历对话框
 """
-import datetime
-from typing import Optional, Dict, List, Any
 
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QCalendarWidget, QWidget, QMessageBox, QScrollArea, QFrame,
-)
-from PyQt5.QtGui import QFont, QTextCharFormat, QColor, QCursor
-from PyQt5.QtCore import Qt, QDate
+import datetime
+from typing import Any, Dict, List, Optional
 
 from lunar_python import Solar
-from system_core import global_config, should_work_today, LunarUtils
-from infrastructure import info, debug, warning, error, parse_date_str, is_date_in_period
+from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtGui import QColor, QTextCharFormat
+from PyQt5.QtWidgets import (
+    QCalendarWidget,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
 from gui.style_helpers import (
-    create_button, create_label, create_card_widget,
-    create_header_widget,
+    create_card_widget,
+    create_label,
 )
 from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
+from gui.styles import FontSize, FontStyle
+from infrastructure import debug, error, info, is_date_in_period, parse_date_str, warning
+from system_core import global_config, should_work_today
 
 
 class CalendarDialog(QDialog):
@@ -68,7 +76,7 @@ class CalendarDialog(QDialog):
         header_layout.setContentsMargins(20, 15, 20, 15)
 
         title = create_label(
-            "\U0001F4C5 万年历 - 任务执行计划",
+            "\U0001f4c5 万年历 - 任务执行计划",
             font_size=FontSize.DIALOG_TITLE,
             bold=True,
         )
@@ -83,9 +91,7 @@ class CalendarDialog(QDialog):
         self.calendar = QCalendarWidget()
         self.calendar.setFont(FontStyle.normal(FontSize.CALENDAR_NORMAL))
         self.calendar.setGridVisible(True)
-        self.calendar.setVerticalHeaderFormat(
-            QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader
-        )
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         self.calendar.currentPageChanged.connect(self.on_month_changed)
         self.calendar.setMinimumHeight(300)
         main_layout.addWidget(self.calendar)
@@ -106,28 +112,20 @@ class CalendarDialog(QDialog):
         theme = ThemeManager.current_theme()
 
         # 公历日期
-        self.solar_label = create_label(
-            "", font_size=FontSize.CALENDAR_LARGE, bold=True
-        )
+        self.solar_label = create_label("", font_size=FontSize.CALENDAR_LARGE, bold=True)
         self.solar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         detail_layout.addWidget(self.solar_label)
 
         # 农历日期
-        self.lunar_date_label = create_label(
-            "", font_size=FontSize.CALENDAR_DETAIL
-        )
+        self.lunar_date_label = create_label("", font_size=FontSize.CALENDAR_DETAIL)
         self.lunar_date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lunar_date_label.setStyleSheet(
-            f"color: {theme.danger}; background: transparent;"
-        )
+        self.lunar_date_label.setStyleSheet(f"color: {theme.danger}; background: transparent;")
         detail_layout.addWidget(self.lunar_date_label)
 
         # 干支
         self.ganzhi_label = create_label("", font_size=FontSize.CALENDAR_NORMAL)
         self.ganzhi_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ganzhi_label.setStyleSheet(
-            f"color: {theme.text_primary}; background: transparent;"
-        )
+        self.ganzhi_label.setStyleSheet(f"color: {theme.text_primary}; background: transparent;")
         detail_layout.addWidget(self.ganzhi_label)
 
         # 分隔线
@@ -157,9 +155,7 @@ class CalendarDialog(QDialog):
         detail_layout.addWidget(sep2)
 
         # 额外信息
-        self.extra_info_label = create_label(
-            "", font_size=FontSize.CALENDAR_SMALL
-        )
+        self.extra_info_label = create_label("", font_size=FontSize.CALENDAR_SMALL)
         self.extra_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.extra_info_label.setStyleSheet(
             f"color: {theme.text_secondary}; background: transparent;"
@@ -168,9 +164,7 @@ class CalendarDialog(QDialog):
         detail_layout.addWidget(self.extra_info_label)
 
         # 工作状态
-        self.work_status_label = create_label(
-            "", font_size=FontSize.CALENDAR_NORMAL, bold=True
-        )
+        self.work_status_label = create_label("", font_size=FontSize.CALENDAR_NORMAL, bold=True)
         self.work_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.work_status_label.setStyleSheet(
             f"background-color: {theme.primary_bg}; color: {theme.primary}; "
@@ -218,23 +212,17 @@ class CalendarDialog(QDialog):
         legend_layout.addStretch()
 
         # 需要执行任务
-        exec_legend = self._create_legend_item(
-            theme.success, "需要执行任务"
-        )
+        exec_legend = self._create_legend_item(theme.success, "需要执行任务")
         legend_layout.addWidget(exec_legend)
         legend_layout.addSpacing(20)
 
         # 不执行任务
-        no_exec_legend = self._create_legend_item(
-            theme.danger, "不执行任务"
-        )
+        no_exec_legend = self._create_legend_item(theme.danger, "不执行任务")
         legend_layout.addWidget(no_exec_legend)
         legend_layout.addSpacing(20)
 
         # 调休上班
-        compensatory_legend = self._create_legend_item(
-            theme.warning, "调休上班"
-        )
+        compensatory_legend = self._create_legend_item(theme.warning, "调休上班")
         legend_layout.addWidget(compensatory_legend)
         legend_layout.addStretch()
 
@@ -247,9 +235,7 @@ class CalendarDialog(QDialog):
 
         color_label = QLabel()
         color_label.setFixedSize(16, 16)
-        color_label.setStyleSheet(
-            f"background-color: {color}; border-radius: 2px;"
-        )
+        color_label.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
 
         text_label = create_label(text, font_size=FontSize.CALENDAR_NORMAL)
 
@@ -271,19 +257,13 @@ class CalendarDialog(QDialog):
                 return
 
             selected_date = self.calendar.selectedDate()
-            date = datetime.date(
-                selected_date.year(), selected_date.month(), selected_date.day()
-            )
+            date = datetime.date(selected_date.year(), selected_date.month(), selected_date.day())
 
-            weekday_names = [
-                "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"
-            ]
+            weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
             weekday_str = weekday_names[date.weekday()]
 
             if self.solar_label:
-                self.solar_label.setText(
-                    f"{date.year}年{date.month}月{date.day}日 ({weekday_str})"
-                )
+                self.solar_label.setText(f"{date.year}年{date.month}月{date.day}日 ({weekday_str})")
 
             should_work, status = self.should_work_on_date(date)
 
@@ -316,10 +296,9 @@ class CalendarDialog(QDialog):
                 if lunar_detail.get("jieqi"):
                     extra_parts.append(f"节气：{lunar_detail['jieqi']}")
                 if lunar_detail.get("festivals"):
-                    all_festivals = (
-                        lunar_detail["festivals"].get("traditional", [])
-                        + lunar_detail["festivals"].get("solar", [])
-                    )
+                    all_festivals = lunar_detail["festivals"].get("traditional", []) + lunar_detail[
+                        "festivals"
+                    ].get("solar", [])
                     if all_festivals:
                         extra_parts.append(f"节日：{'、'.join(all_festivals)}")
                 if lunar_detail.get("other_info"):
@@ -349,7 +328,7 @@ class CalendarDialog(QDialog):
 
             debug("main", f"万年历日期选中：{date}")
         except Exception as e:
-            error("main", f"日期选择处理出错", exc_info=True)
+            error("main", "日期选择处理出错", exc_info=True)
             if self.solar_label:
                 self.solar_label.setText(f"日期处理出错：{str(e)}")
 
@@ -397,10 +376,7 @@ class CalendarDialog(QDialog):
             month_ganzhi = lunar.getMonthInGanZhi()
             day_ganzhi = lunar.getDayInGanZhi()
             year_shengxiao = lunar.getYearShengXiao()
-            ganzhi_str = (
-                f"{year_ganzhi}年 ({year_shengxiao}年) "
-                f"{month_ganzhi}月 {day_ganzhi}日"
-            )
+            ganzhi_str = f"{year_ganzhi}年 ({year_shengxiao}年) " f"{month_ganzhi}月 {day_ganzhi}日"
 
             yi_list = lunar.getDayYi()
             ji_list = lunar.getDayJi()
@@ -476,17 +452,13 @@ class CalendarDialog(QDialog):
                 custom_work_periods = date_rules.get("CUSTOM_WORKDAY_PERIODS", [])
                 for period in custom_work_periods:
                     if is_date_in_period(date, period):
-                        status = (
-                            f"自定义工作日({period.get('name')}) - 需要执行任务"
-                        )
+                        status = f"自定义工作日({period.get('name')}) - 需要执行任务"
                         break
 
                 custom_holiday_periods = date_rules.get("CUSTOM_HOLIDAY_PERIODS", [])
                 for period in custom_holiday_periods:
                     if is_date_in_period(date, period):
-                        status = (
-                            f"自定义假期({period.get('name')}) - 不执行任务"
-                        )
+                        status = f"自定义假期({period.get('name')}) - 不执行任务"
                         break
 
             return (result, status)
@@ -514,16 +486,16 @@ class CalendarDialog(QDialog):
             if current_month == 12:
                 last_day = datetime.date(current_year, current_month, 31)
             else:
-                last_day = datetime.date(current_year, current_month + 1, 1) - datetime.timedelta(days=1)
+                last_day = datetime.date(current_year, current_month + 1, 1) - datetime.timedelta(
+                    days=1
+                )
 
             current_date = first_day
             day_count = 0
             while current_date <= last_day:
                 try:
                     should_work, status = self.should_work_on_date(current_date)
-                    qt_date = QDate(
-                        current_date.year, current_date.month, current_date.day
-                    )
+                    qt_date = QDate(current_date.year, current_date.month, current_date.day)
 
                     if should_work:
                         self.calendar.setDateTextFormat(qt_date, QTextCharFormat())

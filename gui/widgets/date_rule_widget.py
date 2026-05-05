@@ -2,24 +2,31 @@
 日期规则组件模块
 使用主题系统和组件工厂重构的日期规则编辑组件
 """
-from typing import List, Optional, Dict, Any
+
+from typing import Any, Dict, Optional
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QCheckBox, QMessageBox, QFrame, QScrollArea,
-    QAbstractItemView, QComboBox,
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt5.QtCore import Qt
 
-from system_core import global_config, DEFAULT_CONFIG, WEEKDAY_MAPPING
 from gui.dialogs.period_edit_dialog import PeriodEditDialog
 from gui.style_helpers import (
-    create_button, create_label, create_section_title,
-    create_card_widget, create_tip_label,
+    create_button,
+    create_card_widget,
+    create_section_title,
 )
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
+from gui.style_manager import StyleManager
+from system_core import DEFAULT_CONFIG, WEEKDAY_MAPPING, global_config
 
 
 class DateRuleWidget(QWidget):
@@ -58,15 +65,13 @@ class DateRuleWidget(QWidget):
         # 启用/禁用复选框
         enable_layout = QHBoxLayout()
         self.enable_checkbox = QCheckBox("启用自定义日期规则")
-        self.enable_checkbox.setChecked(
-            self.date_rules.get("ENABLE_CUSTOM_RULE", False)
-        )
+        self.enable_checkbox.setChecked(self.date_rules.get("ENABLE_CUSTOM_RULE", False))
         enable_layout.addWidget(self.enable_checkbox)
         enable_layout.addStretch()
         main_layout.addLayout(enable_layout)
 
         # 每周执行日选择
-        weekday_title = create_section_title("\U0001F4C6 每周执行日")
+        weekday_title = create_section_title("\U0001f4c6 每周执行日")
         main_layout.addWidget(weekday_title)
 
         weekday_layout = QHBoxLayout()
@@ -81,7 +86,7 @@ class DateRuleWidget(QWidget):
         main_layout.addLayout(weekday_layout)
 
         # 表格标题
-        title = create_section_title("\U0001F4C5 自定义日期规则列表")
+        title = create_section_title("\U0001f4c5 自定义日期规则列表")
         main_layout.addWidget(title)
 
         # 编辑区域
@@ -97,9 +102,7 @@ class DateRuleWidget(QWidget):
         edit_layout.addWidget(QLabel("类型："))
         edit_layout.addWidget(self.type_combo)
 
-        add_btn = create_button(
-            "\u2795 添加规则", btn_type="success", min_width=100
-        )
+        add_btn = create_button("\u2795 添加规则", btn_type="success", min_width=100)
         add_btn.clicked.connect(self.add_rule)
         edit_layout.addWidget(add_btn)
 
@@ -109,15 +112,9 @@ class DateRuleWidget(QWidget):
         self.table = QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["名称", "开始日期", "结束日期", "类型"])
-        self.table.setSelectionBehavior(
-            QAbstractItemView.SelectionBehavior.SelectRows
-        )
-        self.table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
-        )
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
         main_layout.addWidget(self.table)
@@ -126,23 +123,17 @@ class DateRuleWidget(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
-        edit_btn = create_button(
-            "\u270F\ufe0f 编辑规则", btn_type="primary", min_width=100
-        )
+        edit_btn = create_button("\u270f\ufe0f 编辑规则", btn_type="primary", min_width=100)
         edit_btn.clicked.connect(self.edit_rule)
         btn_layout.addWidget(edit_btn)
 
-        delete_btn = create_button(
-            "\u274C 删除规则", btn_type="danger", min_width=100
-        )
+        delete_btn = create_button("\u274c 删除规则", btn_type="danger", min_width=100)
         delete_btn.clicked.connect(self.delete_rule)
         btn_layout.addWidget(delete_btn)
 
         btn_layout.addStretch()
 
-        clear_btn = create_button(
-            "\U0001F5D1\ufe0f 清空所有", btn_type="gray", min_width=100
-        )
+        clear_btn = create_button("\U0001f5d1\ufe0f 清空所有", btn_type="gray", min_width=100)
         clear_btn.clicked.connect(self.clear_all)
         btn_layout.addWidget(clear_btn)
 
@@ -228,11 +219,14 @@ class DateRuleWidget(QWidget):
                 QMessageBox.warning(self, "提示", "规则索引无效")
                 return
 
-        dialog = PeriodEditDialog(self, period={
-            "name": rule.get("name", ""),
-            "start": rule.get("start", ""),
-            "end": rule.get("end", ""),
-        })
+        dialog = PeriodEditDialog(
+            self,
+            period={
+                "name": rule.get("name", ""),
+                "start": rule.get("start", ""),
+                "end": rule.get("end", ""),
+            },
+        )
         if dialog.exec() and dialog.result_period:
             updated_rule = dict(dialog.result_period)
             updated_rule["type"] = rule_type
@@ -275,7 +269,9 @@ class DateRuleWidget(QWidget):
     def clear_all(self) -> None:
         """清空所有规则"""
         reply = QMessageBox.question(
-            self, "确认", "确定要清空所有自定义日期规则吗？",
+            self,
+            "确认",
+            "确定要清空所有自定义日期规则吗？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -289,8 +285,7 @@ class DateRuleWidget(QWidget):
 
         # 保存每周执行日
         weekday_days = [
-            day_idx for day_idx, cb in self.weekday_checkboxes.items()
-            if cb.isChecked()
+            day_idx for day_idx, cb in self.weekday_checkboxes.items() if cb.isChecked()
         ]
         self.date_rules["WEEKLY_EXECUTE_DAYS"] = weekday_days
 

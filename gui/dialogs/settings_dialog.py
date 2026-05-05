@@ -2,24 +2,34 @@
 设置对话框模块
 现代卡片式设计，支持主题切换
 """
-from typing import Optional, Dict
 
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QFormLayout, QTabWidget, QWidget, QCheckBox, QComboBox,
-    QMessageBox,
-)
+from typing import Optional
+
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from system_core import global_config, DEFAULT_CONFIG, save_config
-from gui.widgets import DateRuleWidget, CompensatoryWorkdayWidget, BaseHolidayWidget
 from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
 from gui.style_helpers import (
-    create_button, create_label, create_section_title,
+    create_button,
+    create_label,
+    create_section_title,
     create_tip_label,
 )
 from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
+from gui.styles import FontSize
+from gui.widgets import BaseHolidayWidget, CompensatoryWorkdayWidget, DateRuleWidget
+from system_core import DEFAULT_CONFIG, global_config, save_config
 
 # 解密失败的字段在 UI 中显示此占位符
 _DECRYPT_FAILED_PLACEHOLDER = "********"
@@ -132,7 +142,7 @@ class SettingsDialog(QDialog):
         """获取主题显示名称"""
         display_map = {
             "light": "\u2600\ufe0f 亮色主题",
-            "dark": "\U0001F319 暗色主题",
+            "dark": "\U0001f319 暗色主题",
         }
         return display_map.get(theme_name, theme_name)
 
@@ -167,16 +177,22 @@ class SettingsDialog(QDialog):
         self.wifi_name_edit.setMinimumHeight(38)
         wifi_layout.addRow("WiFi 名称：", self.wifi_name_edit)
 
-        self.wifi_password_edit, self.wifi_password_visible, pwd_layout = self._create_password_field("WIFI_PASSWORD")
+        self.wifi_password_edit, self.wifi_password_visible, pwd_layout = (
+            self._create_password_field("WIFI_PASSWORD")
+        )
         wifi_layout.addRow("WiFi 密码：", pwd_layout)
 
         self.wifi_retry_edit = QLineEdit()
-        self.wifi_retry_edit.setText(str(global_config.get("MAX_WIFI_RETRY", DEFAULT_CONFIG["MAX_WIFI_RETRY"])))
+        self.wifi_retry_edit.setText(
+            str(global_config.get("MAX_WIFI_RETRY", DEFAULT_CONFIG["MAX_WIFI_RETRY"]))
+        )
         self.wifi_retry_edit.setMinimumHeight(38)
         wifi_layout.addRow("最大重试次数：", self.wifi_retry_edit)
 
         self.retry_interval_edit = QLineEdit()
-        self.retry_interval_edit.setText(str(global_config.get("RETRY_INTERVAL", DEFAULT_CONFIG["RETRY_INTERVAL"])))
+        self.retry_interval_edit.setText(
+            str(global_config.get("RETRY_INTERVAL", DEFAULT_CONFIG["RETRY_INTERVAL"]))
+        )
         self.retry_interval_edit.setMinimumHeight(38)
         wifi_layout.addRow("重试间隔(秒)：", self.retry_interval_edit)
 
@@ -196,7 +212,9 @@ class SettingsDialog(QDialog):
         self.username_edit.setMinimumHeight(38)
         login_layout.addRow("用户名：", self.username_edit)
 
-        self.password_edit, self.password_visible, login_pwd_layout = self._create_password_field("PASSWORD")
+        self.password_edit, self.password_visible, login_pwd_layout = self._create_password_field(
+            "PASSWORD"
+        )
         login_layout.addRow("密码：", login_pwd_layout)
 
         self.isp_combo = QComboBox()
@@ -225,13 +243,17 @@ class SettingsDialog(QDialog):
         shutdown_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.shutdown_hour_edit = QLineEdit()
-        self.shutdown_hour_edit.setText(str(global_config.get("SHUTDOWN_HOUR", DEFAULT_CONFIG["SHUTDOWN_HOUR"])))
+        self.shutdown_hour_edit.setText(
+            str(global_config.get("SHUTDOWN_HOUR", DEFAULT_CONFIG["SHUTDOWN_HOUR"]))
+        )
         self.shutdown_hour_edit.setPlaceholderText("请输入关机小时（0-23）")
         self.shutdown_hour_edit.setMinimumHeight(38)
         shutdown_layout.addRow("关机小时：", self.shutdown_hour_edit)
 
         self.shutdown_min_edit = QLineEdit()
-        self.shutdown_min_edit.setText(str(global_config.get("SHUTDOWN_MIN", DEFAULT_CONFIG["SHUTDOWN_MIN"])))
+        self.shutdown_min_edit.setText(
+            str(global_config.get("SHUTDOWN_MIN", DEFAULT_CONFIG["SHUTDOWN_MIN"]))
+        )
         self.shutdown_min_edit.setPlaceholderText("请输入关机分钟（0-59）")
         self.shutdown_min_edit.setMinimumHeight(38)
         shutdown_layout.addRow("关机分钟：", self.shutdown_min_edit)
@@ -289,10 +311,12 @@ class SettingsDialog(QDialog):
         lunar_format_layout = QHBoxLayout()
         self.lunar_format_combo = QComboBox()
         self.lunar_format_combo.setMinimumHeight(38)
-        self.lunar_format_combo.addItems([
-            "简化格式（如：正月初一）",
-            "完整格式（如：农历2025年正月初一）",
-        ])
+        self.lunar_format_combo.addItems(
+            [
+                "简化格式（如：正月初一）",
+                "完整格式（如：农历2025年正月初一）",
+            ]
+        )
         self.lunar_format_combo.setCurrentIndex(global_config.get("LUNAR_DISPLAY_FORMAT", 0))
         lunar_format_layout.addWidget(self.lunar_format_combo)
         lunar_format_layout.addStretch()
@@ -310,11 +334,11 @@ class SettingsDialog(QDialog):
 
         button_box.addStretch()
 
-        save_btn = create_button("\U0001F4BE 保存配置", btn_type="success", min_width=120)
+        save_btn = create_button("\U0001f4be 保存配置", btn_type="success", min_width=120)
         save_btn.clicked.connect(self.save_config)
         button_box.addWidget(save_btn)
 
-        cancel_btn = create_button("\u274C 取消", btn_type="gray", min_width=100)
+        cancel_btn = create_button("\u274c 取消", btn_type="gray", min_width=100)
         cancel_btn.clicked.connect(self.reject)
         button_box.addWidget(cancel_btn)
 
@@ -336,9 +360,7 @@ class SettingsDialog(QDialog):
         btn = create_button("显示", btn_type="gray", font_size=10, min_height=34)
         btn.setCheckable(True)
         btn.setFixedWidth(60)
-        btn.clicked.connect(
-            lambda: self.toggle_password_visibility(edit, btn)
-        )
+        btn.clicked.connect(lambda: self.toggle_password_visibility(edit, btn))
 
         layout = QHBoxLayout()
         layout.addWidget(edit)

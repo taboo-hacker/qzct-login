@@ -2,17 +2,23 @@
 更改主密码对话框模块
 使用组件工厂重构的密码对话框
 """
+
 from typing import Optional
 
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QFormLayout, QFrame,
-    QLineEdit, QHBoxLayout, QPushButton, QMessageBox,
-)
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QVBoxLayout,
+)
 
-from gui.style_helpers import create_button, create_label, create_card_widget
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
+from gui.style_helpers import create_button, create_card_widget, create_label
+from gui.style_manager import StyleManager
+from gui.styles import FontSize
 
 
 class ChangeMasterPasswordDialog(QDialog):
@@ -36,7 +42,7 @@ class ChangeMasterPasswordDialog(QDialog):
         header_layout = QVBoxLayout()
         header_layout.setContentsMargins(25, 20, 25, 15)
         title_label = create_label(
-            "\U0001F510 更改加密主密码",
+            "\U0001f510 更改加密主密码",
             font_size=FontSize.DIALOG_TITLE,
             bold=True,
         )
@@ -69,9 +75,7 @@ class ChangeMasterPasswordDialog(QDialog):
         self.confirm_password_edit = QLineEdit()
         self.confirm_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_password_edit.setPlaceholderText("请再次输入新主密码")
-        form_layout.addRow(
-            create_label("确认新密码："), self.confirm_password_edit
-        )
+        form_layout.addRow(create_label("确认新密码："), self.confirm_password_edit)
 
         main_layout.addWidget(form_frame)
         main_layout.addSpacing(10)
@@ -81,15 +85,11 @@ class ChangeMasterPasswordDialog(QDialog):
         btn_layout.setSpacing(10)
         btn_layout.addStretch()
 
-        ok_btn = create_button(
-            "\U0001F4BE 更改密码", btn_type="success", min_width=120
-        )
+        ok_btn = create_button("\U0001f4be 更改密码", btn_type="success", min_width=120)
         ok_btn.clicked.connect(self.change_password)
         btn_layout.addWidget(ok_btn)
 
-        cancel_btn = create_button(
-            "\u274C 取消", btn_type="gray", min_width=100
-        )
+        cancel_btn = create_button("\u274c 取消", btn_type="gray", min_width=100)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
@@ -135,11 +135,7 @@ class ChangeMasterPasswordDialog(QDialog):
         success = change_master_password(old_password, new_password)
 
         if success:
-            QMessageBox.information(
-                self, "成功", "主密码更改成功，配置已重新加密"
-            )
+            QMessageBox.information(self, "成功", "主密码更改成功，配置已重新加密")
             self.accept()
         else:
-            QMessageBox.critical(
-                self, "错误", "主密码更改失败，请检查旧密码是否正确"
-            )
+            QMessageBox.critical(self, "错误", "主密码更改失败，请检查旧密码是否正确")
