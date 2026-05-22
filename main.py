@@ -7,10 +7,12 @@ from PyQt5.QtWidgets import QApplication
 
 from gui.main_window import MainWindow
 from gui.style_manager import StyleManager, ThemeManager
+from system_core import global_config, load_config
 
 
 def apply_global_theme(app: QApplication) -> None:
-    ThemeManager.set_theme("light")
+    theme_name = global_config.get("THEME", "light")
+    ThemeManager.set_theme(theme_name)
     qss = StyleManager.get_global_stylesheet()
     app.setStyleSheet(qss)
 

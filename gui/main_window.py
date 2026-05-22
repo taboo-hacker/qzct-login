@@ -8,8 +8,9 @@ import sys
 from typing import Optional
 
 from PyQt5.QtCore import QPoint, Qt, QTimer
-from PyQt5.QtGui import QCursor, QMouseEvent
+from PyQt5.QtGui import QColor, QCursor, QIcon, QMouseEvent
 from PyQt5.QtWidgets import (
+    QApplication,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -18,10 +19,11 @@ from PyQt5.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QStyle,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtGui import QColor
 
 from business import (
     campus_login,
@@ -135,11 +137,15 @@ class MainWindow(QMainWindow):
         self._drag_pos: Optional[QPoint] = None
         self._corner_radius = 12
         self._shadow_margin = 10  # 给 QGraphicsDropShadowEffect 留 blur 空间
+        self._force_quit = False  # 系统托盘：区分隐藏到托盘 vs 真实退出
 
-        total_w = 860 + 2 * self._shadow_margin
-        total_h = 620 + 2 * self._shadow_margin
-        self.setMinimumSize(total_w, total_h)
-        self.resize(total_w, total_h)
+        # 自适应窗口：最小 750×540（比固定 860×620 宽松），默认尺寸仍舒适
+        default_w = 860 + 2 * self._shadow_margin
+        default_h = 620 + 2 * self._shadow_margin
+        min_w = 750 + 2 * self._shadow_margin
+        min_h = 540 + 2 * self._shadow_margin
+        self.setMinimumSize(min_w, min_h)
+        self.resize(default_w, default_h)
 
         # 基础 UI（用于日志系统）
         self._init_basic_ui()
@@ -153,6 +159,9 @@ class MainWindow(QMainWindow):
         # 重定向输出
         sys.stdout = StreamRedirector("stdout", 1)
         sys.stderr = StreamRedirector("stderr", 3)
+
+        # 系统托盘（在所有 UI 元素之后创建，在 title_menu_bar 之前）
+        self._setup_tray()
 
         # 标题菜单栏（顶部固定）
         self.title_menu_bar = TitleMenuBar(self)
@@ -535,9 +544,11 @@ class MainWindow(QMainWindow):
         if success:
             self.footer_status.setText("所有任务执行完成")
             info("main", "任务链执行成功")
+            self._tray_notify("校园网自动登录", "所有任务执行完成")
         else:
             self.footer_status.setText("任务链执行完成，部分任务失败")
             info("main", "任务链执行完成，但有任务失败")
+            self._tray_notify("校园网自动登录", "部分任务执行失败，请查看日志")
 
     def _on_chain_error(self, results: list) -> None:
         """任务链出错回调"""
@@ -701,8 +712,56 @@ class MainWindow(QMainWindow):
         dialog = CalendarDialog(self)
         dialog.exec()
 
+    def _setup_tray(self) -> None:
+        """创建系统托盘图标和菜单"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            info("main", "系统托盘不可用")
+            return
+
+        icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
+        self._tray_icon = QSystemTrayIcon(icon, self)
+        self._tray_icon.setToolTip("校园网自动登录")
+
+        tray_menu = QMenu()
+        show_action = tray_menu.addAction("显示主窗口")
+        show_action.triggered.connect(self._tray_show)
+        tray_menu.addSeparator()
+        quit_action = tray_menu.addAction("退出")
+        quit_action.triggered.connect(self._real_close)
+
+        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+
+    def _tray_show(self) -> None:
+        """从托盘恢复显示窗口"""
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _tray_notify(self, title: str, message: str) -> None:
+        """发送系统托盘通知气泡"""
+        if hasattr(self, "_tray_icon") and self._tray_icon.isVisible():
+            self._tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 3000)
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """托盘图标双击/单击事件"""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._tray_show()
+
+    def _real_close(self) -> None:
+        """真实退出程序（清理并关闭）"""
+        self._force_quit = True
+        self.close()
+
     def closeEvent(self, event) -> None:
-        """关闭窗口事件"""
+        """关闭窗口事件 —— 最小化到系统托盘，而非退出"""
+        if not self._force_quit and hasattr(self, "_tray_icon") and self._tray_icon.isVisible():
+            self.hide()
+            self._tray_notify("校园网自动登录", "程序已最小化到系统托盘，右键可退出")
+            event.ignore()
+            return
+
         if self.task_executor:
             self.task_executor.cancel_all()
             self.task_executor.shutdown(wait=False)
