@@ -29,6 +29,7 @@ dependencies = [
     "requests>=2.25.0,<3.0.0",
     "cryptography>=3.0.0,<44.0.0",
     "lunar-python>=1.0.0,<2.0.0",
+    "chinesecalendar>=1.0.0,<2.0.0",
     "tomli>=2.0.0; python_version < '3.11'",
     "loguru>=0.7.0,<1.0.0",
 ]

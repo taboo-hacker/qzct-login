@@ -240,8 +240,10 @@ def auto_connect_wifi(cfg=None):
             return True
 
         if retry_count < max_retry:
-            info("business", f"等待{retry_interval}秒后重试...")
-            time.sleep(retry_interval)
+            # 指数退避：1s → 2s → 4s → 8s → ... 上限 60s
+            delay = min(retry_interval * (2 ** (retry_count - 1)), 60)
+            info("business", f"等待{delay}秒后重试...")
+            time.sleep(delay)
 
     error("business", f"超过{max_retry}次重试，WiFi连接失败")
     return False

@@ -6,11 +6,20 @@ import os
 import threading
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from lunar_python import Solar
-from PyQt5.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
+
+
+def _lazy_import_qt():
+    """延迟导入 Qt —— 避免 system_core 在模块加载时硬耦合 PyQt5。
+
+    所有需要 QInputDialog / QMessageBox 的函数在运行时调用此 helper，
+    使得 core 层在不导入 Qt 的情况下独立可测。
+    """
+    from PyQt5.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
+
+    return QApplication, QInputDialog, QLineEdit, QMessageBox
 
 from infrastructure import error, info
 
@@ -273,6 +282,9 @@ def generate_derived_key_from_master_password(master_password, salt=None):
     """
     从主密码生成派生密钥
 
+    PBKDF2 600k 迭代在后台线程执行，主线程用 QEventLoop 保持 UI 响应。
+    如果 Qt 尚未初始化（CLI 环境），直接同步执行。
+
     Args:
         master_password (str): 主密码
         salt (bytes, optional): 盐值
@@ -280,17 +292,41 @@ def generate_derived_key_from_master_password(master_password, salt=None):
     Returns:
         tuple: (key, salt) 生成的派生密钥和使用的盐值
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     if salt is None:
         salt = load_salt()
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_do_derive_key, master_password, salt)
+
+    try:
+        from PyQt5.QtCore import QEventLoop
+        from PyQt5.QtWidgets import QApplication
+
+        if QApplication.instance() is not None:
+            loop = QEventLoop()
+            future.add_done_callback(lambda f: loop.quit())
+            if not future.done():
+                loop.exec()
+        else:
+            future.result()  # 无 Qt 环境，直接同步等待
+    except ImportError:
+        future.result()  # Qt 不可用，直接同步等待
+
+    executor.shutdown(wait=False)
+    return future.result(), salt
+
+
+def _do_derive_key(master_password: str, salt: bytes) -> bytes:
+    """在后台线程执行 PBKDF2 密钥派生。"""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
         iterations=600000,
-        backend=default_backend(),
     )
-    key = base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
-    return key, salt
+    return base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
 
 
 def save_derived_key(key):
@@ -325,6 +361,8 @@ def prompt_for_master_password():
     Returns:
         str: 主密码
     """
+    QApplication, QInputDialog, QLineEdit, QMessageBox = _lazy_import_qt()
+
     app = QApplication.instance()
     if not app:
         app = QApplication([])
@@ -368,6 +406,8 @@ def prompt_for_verify_master_password():
     Returns:
         str: 主密码
     """
+    QApplication, QInputDialog, QLineEdit, QMessageBox = _lazy_import_qt()
+
     app = QApplication.instance()
     if not app:
         app = QApplication([])
@@ -548,6 +588,7 @@ def load_and_update_encryption(config):
         return master_password, old_derived_key
     except Exception as e:
         error("system_core", f"解密主密码失败：{e}")
+        _, _, _, QMessageBox = _lazy_import_qt()
         reply = QMessageBox.question(
             None,
             "解密失败",
@@ -777,6 +818,7 @@ def load_config():
     except Exception as e:
         error("system_core", f"加载配置失败，使用默认配置：{e}")
         global_config.replace_all(copy.deepcopy(DEFAULT_CONFIG))
+        _, _, _, QMessageBox = _lazy_import_qt()
         QMessageBox.warning(
             None,
             "配置加载失败",
@@ -814,6 +856,7 @@ def save_config():
         return True
     except Exception as e:
         error("system_core", f"保存配置失败：{e}")
+        _, _, _, QMessageBox = _lazy_import_qt()
         QMessageBox.critical(None, "错误", f"保存配置失败：{e}")
         return False
 
@@ -864,9 +907,32 @@ def change_master_password(old_password, new_password):
 # ==========================================
 # 日期判断模块
 # ==========================================
+def _chinese_calendar_is_holiday(date) -> bool:
+    """chinesecalendar 是否为法定假日。数据不可用时返回 False。"""
+    try:
+        import chinese_calendar as chinesecalendar
+
+        return chinesecalendar.is_holiday(date)
+    except (ImportError, NotImplementedError):
+        return False
+
+
+def _chinese_calendar_is_workday(date) -> bool:
+    """chinesecalendar 是否为工作日（含调休上班日）。数据不可用时返回 False。"""
+    try:
+        import chinese_calendar as chinesecalendar
+
+        return chinesecalendar.is_workday(date)
+    except (ImportError, NotImplementedError):
+        return False
+
+
 def should_work_today(check_date=None):
     """
     判断指定日期是否需要执行自动化任务
+
+    判断优先级：硬编码调休日 > 硬编码节假日 > chinesecalendar > 周末规则。
+    硬编码数据覆盖学校特有假期（寒暑假），chinesecalendar 作为未来的法定假日兜底。
 
     Args:
         check_date (datetime.date, optional): 要检查的日期，默认为今天
@@ -879,6 +945,7 @@ def should_work_today(check_date=None):
     today = check_date if check_date is not None else datetime.date.today()
     date_rules = global_config.get("DATE_RULES", DEFAULT_CONFIG["DATE_RULES"])
 
+    # 1. 硬编码调休上班日（优先级最高）
     compensatory_days = [
         parse_date_str(d)
         for d in global_config.get("COMPENSATORY_WORKDAYS", [])
@@ -887,33 +954,39 @@ def should_work_today(check_date=None):
     if today in compensatory_days:
         return True
 
+    # 2. 自定义规则分支
     if date_rules.get("ENABLE_CUSTOM_RULE", False):
-        custom_work_periods = date_rules.get("CUSTOM_WORKDAY_PERIODS", [])
-        for period in custom_work_periods:
+        for period in date_rules.get("CUSTOM_WORKDAY_PERIODS", []):
             if is_date_in_period(today, period):
                 return True
-
-        custom_holiday_periods = date_rules.get("CUSTOM_HOLIDAY_PERIODS", [])
-        for period in custom_holiday_periods:
+        for period in date_rules.get("CUSTOM_HOLIDAY_PERIODS", []):
             if is_date_in_period(today, period):
                 return False
 
         weekday = today.weekday()
         weekly_execute_days = date_rules.get("WEEKLY_EXECUTE_DAYS", [0, 1, 2, 3, 4])
-        if weekday in weekly_execute_days:
+
+        # chinesecalendar 作为兜底：法定调休上班日自动覆盖
+        if weekday not in weekly_execute_days and _chinese_calendar_is_workday(today):
             return True
-        else:
+        # chinesecalendar 作为兜底：法定假日自动覆盖
+        if weekday in weekly_execute_days and _chinese_calendar_is_holiday(today):
             return False
 
-    else:
-        base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])
-        for period in base_holiday_periods:
-            if is_date_in_period(today, period):
-                return False
+        return weekday in weekly_execute_days
 
-        weekday = today.weekday()
-        weekly_execute_days = [0, 1, 2, 3, 4]
-        if weekday in weekly_execute_days:
-            return True
-        else:
+    # 3. 基础规则分支（使用硬编码节假日 + chinesecalendar 兜底）
+    base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])
+    for period in base_holiday_periods:
+        if is_date_in_period(today, period):
             return False
+
+    # chinesecalendar 法定假日兜底（覆盖硬编码未包含的年份）
+    if _chinese_calendar_is_holiday(today):
+        return False
+    # chinesecalendar 调休上班日兜底
+    if _chinese_calendar_is_workday(today):
+        return True
+
+    weekday = today.weekday()
+    return weekday in [0, 1, 2, 3, 4]
