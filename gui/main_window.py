@@ -7,10 +7,11 @@ import datetime
 import sys
 from typing import Optional
 
-from PyQt5.QtCore import QPoint, QRectF, Qt, QTimer
-from PyQt5.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPainterPath
+from PyQt5.QtCore import QPoint, Qt, QTimer
+from PyQt5.QtGui import QCursor, QMouseEvent
 from PyQt5.QtWidgets import (
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -20,6 +21,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PyQt5.QtGui import QColor
 
 from business import (
     campus_login,
@@ -132,9 +134,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("校园网自动登录 + 定时关机")
         self._drag_pos: Optional[QPoint] = None
         self._corner_radius = 12
-        self._shadow_margin = 6
-        self._shadow_blur = 5
-        self._shadow_opacity = 30
+        self._shadow_margin = 10  # 给 QGraphicsDropShadowEffect 留 blur 空间
 
         total_w = 860 + 2 * self._shadow_margin
         total_h = 620 + 2 * self._shadow_margin
@@ -200,16 +200,29 @@ class MainWindow(QMainWindow):
         central.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setCentralWidget(central)
 
+        # 给 outer 留 _shadow_margin 的环形空间渲染阴影
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setContentsMargins(
+            self._shadow_margin,
+            self._shadow_margin,
+            self._shadow_margin,
+            self._shadow_margin,
+        )
         root_layout.setSpacing(0)
 
-        # 最外层容器（四个角 12px 圆角，内边距 8px）
+        # 最外层容器（QSS 已带 border-radius:12px + 主题背景色）
         outer = QFrame()
         outer.setObjectName("outerContainer")
         self.main_layout = QVBoxLayout(outer)
         self.main_layout.setContentsMargins(8, 8, 8, 8)
         self.main_layout.setSpacing(0)
+
+        # GPU 加速的阴影，替代旧 paintEvent 中手绘的 5 层同心圆角矩形
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 50))
+        outer.setGraphicsEffect(shadow)
 
         root_layout.addWidget(outer)
 
@@ -299,37 +312,6 @@ class MainWindow(QMainWindow):
         time_str = now.strftime("%H:%M:%S")
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"就绪  |  {time_str}")
-
-    def paintEvent(self, event) -> None:
-        """绘制圆角窗口及柔和阴影"""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        sm = self._shadow_margin
-        content_rect = QRectF(self.rect()).adjusted(sm, sm, -sm, -sm)
-
-        # 绘制阴影 — 多层同心圆角矩形，从外到内逐渐变深
-        steps = self._shadow_blur
-        for i in range(steps, 0, -1):
-            offset = sm * i / steps
-            alpha = int(self._shadow_opacity * ((1 - i / steps) ** 1.5))
-            if alpha < 1:
-                continue
-            path = QPainterPath()
-            path.addRoundedRect(
-                content_rect.adjusted(-offset, -offset, offset, offset),
-                self._corner_radius,
-                self._corner_radius,
-            )
-            painter.fillPath(path, QColor(0, 0, 0, alpha))
-
-        # 绘制窗口内容背景
-        path = QPainterPath()
-        path.addRoundedRect(content_rect, self._corner_radius, self._corner_radius)
-        theme = ThemeManager.current_theme()
-        painter.fillPath(path, QColor(theme.background))
-
-        event.accept()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """鼠标按下事件（用于窗口拖拽）"""

@@ -10,6 +10,7 @@ import requests
 from requests.exceptions import RequestException
 
 from concurrency import TaskContext, task
+from constants import CONFIG_DIR
 from infrastructure import error, info
 from system_core import ISP_MAPPING, get_config_snapshot, should_work_today
 
@@ -115,9 +116,33 @@ def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
     return profile_xml
 
 
+def _wifi_profile_exists(wifi_name: str) -> bool:
+    """检查 Windows 是否已保存该 WiFi 的 profile。
+
+    若已存在，可直接 connect 而不需要再写入明文密码文件。
+
+    Args:
+        wifi_name (str): WiFi 网络名称（SSID）
+
+    Returns:
+        bool: True 表示已存在 profile，False 表示不存在
+    """
+    try:
+        result = subprocess.check_output(
+            ["netsh", "wlan", "show", "profile"], encoding="gbk", errors="ignore"
+        )
+        return wifi_name in result
+    except subprocess.CalledProcessError:
+        return False
+
+
 def connect_wifi(wifi_name: str, password: str) -> bool:
     """
     连接到指定的WiFi网络
+
+    若 Windows 已保存该 WiFi 的 profile，直接 connect，避免明文密码再次落盘。
+    否则在用户私有目录（~/.qzct/）创建临时 profile，netsh 加载后立即删除。
+    临时文件不再落到系统 temp 目录，限定到当前用户可见。
 
     Args:
         wifi_name (str): WiFi网络名称
@@ -126,24 +151,32 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
     Returns:
         bool: True表示连接成功（或已连接），False表示连接失败
     """
-    temp_file = None
     try:
-        import tempfile
+        if _wifi_profile_exists(wifi_name):
+            info("business", f"使用已有 WiFi profile：{wifi_name}")
+        else:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            tmp_path = os.path.join(CONFIG_DIR, f".wifi_profile_{os.getpid()}.xml")
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    f.write(create_windows_wifi_profile(wifi_name, password))
+                info("business", "创建临时 WiFi profile")
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".xml", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(create_windows_wifi_profile(wifi_name, password))
-            temp_file = f.name
-
-        info("business", f"创建临时WiFi配置文件：{temp_file}")
-
-        subprocess.run(
-            ["netsh", "wlan", "add", "profile", f"filename={temp_file}", "user=all"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+                subprocess.run(
+                    ["netsh", "wlan", "add", "profile", f"filename={tmp_path}", "user=all"],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            finally:
+                # netsh add 完成后密码已入 Windows 凭据存储，临时文件无需保留——
+                # 立即删除，缩短明文密码在磁盘上停留的时间窗口。
+                if os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                        info("business", "已清理临时 profile 文件")
+                    except OSError as e:
+                        error("business", f"清理临时文件失败：{e}")
 
         info("business", f"发起WiFi连接请求：{wifi_name}")
         subprocess.run(
@@ -152,10 +185,6 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-
-        if temp_file and os.path.exists(temp_file):
-            os.unlink(temp_file)
-            info("business", f"清理临时配置文件：{temp_file}")
 
         info("business", "等待WiFi连接稳定...")
         time.sleep(5)
@@ -172,13 +201,6 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
     except Exception as e:
         error("business", f"WiFi连接异常：{str(e)}")
         return False
-    finally:
-        if temp_file and os.path.exists(temp_file):
-            try:
-                os.unlink(temp_file)
-                info("business", f"清理临时配置文件：{temp_file}")
-            except Exception as e:
-                error("business", f"清理临时文件失败：{str(e)}")
 
 
 def auto_connect_wifi(cfg=None):
@@ -308,8 +330,14 @@ def campus_login(cfg=None) -> bool:
 
         info("business", f"开始发送登录请求到 {config['login_url']}")
 
+        # timeout=(connect, read)：3秒内必须建立 TCP 连接（区分网络不可达），
+        # 一旦连上则允许服务器最多 10 秒响应（区分服务器慢）。
         response = session.get(
-            url=config["login_url"], params=params, headers=HEADERS, verify=False, timeout=15
+            url=config["login_url"],
+            params=params,
+            headers=HEADERS,
+            verify=False,
+            timeout=(3, 10),
         )
         response.encoding = "utf-8"
 
