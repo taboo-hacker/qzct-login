@@ -151,6 +151,7 @@ class SettingsDialog(QDialog):
         theme_name = self.theme_combo.itemData(index)
         if theme_name:
             ThemeManager.set_theme(theme_name)
+            global_config["THEME"] = theme_name
             self._apply_styles()
             self._update_child_themes()
 

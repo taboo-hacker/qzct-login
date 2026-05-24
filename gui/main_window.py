@@ -7,16 +7,20 @@ import datetime
 import sys
 from typing import Optional
 
-from PyQt5.QtCore import QPoint, QRectF, Qt, QTimer
-from PyQt5.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPainterPath
+from PyQt5.QtCore import QPoint, Qt, QTimer
+from PyQt5.QtGui import QColor, QCursor, QIcon, QMouseEvent
 from PyQt5.QtWidgets import (
+    QApplication,
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPushButton,
+    QStyle,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -75,9 +79,13 @@ class TitleMenuBar(QFrame):
         layout.addStretch()
 
         self._settings_menu = QMenu("设置", self)
-        self._settings_menu.addAction("配置设置").triggered.connect(self._parent_on_settings)
+        settings_action = self._settings_menu.addAction("配置设置")
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self._parent_on_settings)
         self._settings_menu.addSeparator()
-        self._settings_menu.addAction("任务日历").triggered.connect(self._parent_show_calendar)
+        calendar_action = self._settings_menu.addAction("任务日历")
+        calendar_action.setShortcut("Ctrl+K")
+        calendar_action.triggered.connect(self._parent_show_calendar)
         self._settings_btn = QPushButton("设置 \u25be")
         self._settings_btn.setObjectName("menuBtn")
         self._settings_btn.setFixedHeight(34)
@@ -86,7 +94,9 @@ class TitleMenuBar(QFrame):
         layout.addWidget(self._settings_btn)
 
         self._help_menu = QMenu("帮助", self)
-        self._help_menu.addAction("关于我们").triggered.connect(self._parent_show_about)
+        about_action = self._help_menu.addAction("关于我们")
+        about_action.setShortcut("F1")
+        about_action.triggered.connect(self._parent_show_about)
         self._help_btn = QPushButton("帮助 \u25be")
         self._help_btn.setObjectName("menuBtn")
         self._help_btn.setFixedHeight(34)
@@ -132,14 +142,16 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("校园网自动登录 + 定时关机")
         self._drag_pos: Optional[QPoint] = None
         self._corner_radius = 12
-        self._shadow_margin = 6
-        self._shadow_blur = 5
-        self._shadow_opacity = 30
+        self._shadow_margin = 10  # 给 QGraphicsDropShadowEffect 留 blur 空间
+        self._force_quit = False  # 系统托盘：区分隐藏到托盘 vs 真实退出
 
-        total_w = 860 + 2 * self._shadow_margin
-        total_h = 620 + 2 * self._shadow_margin
-        self.setMinimumSize(total_w, total_h)
-        self.resize(total_w, total_h)
+        # 自适应窗口：最小 750×540（比固定 860×620 宽松），默认尺寸仍舒适
+        default_w = 860 + 2 * self._shadow_margin
+        default_h = 620 + 2 * self._shadow_margin
+        min_w = 750 + 2 * self._shadow_margin
+        min_h = 540 + 2 * self._shadow_margin
+        self.setMinimumSize(min_w, min_h)
+        self.resize(default_w, default_h)
 
         # 基础 UI（用于日志系统）
         self._init_basic_ui()
@@ -153,6 +165,9 @@ class MainWindow(QMainWindow):
         # 重定向输出
         sys.stdout = StreamRedirector("stdout", 1)
         sys.stderr = StreamRedirector("stderr", 3)
+
+        # 系统托盘（在所有 UI 元素之后创建，在 title_menu_bar 之前）
+        self._setup_tray()
 
         # 标题菜单栏（顶部固定）
         self.title_menu_bar = TitleMenuBar(self)
@@ -200,16 +215,29 @@ class MainWindow(QMainWindow):
         central.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setCentralWidget(central)
 
+        # 给 outer 留 _shadow_margin 的环形空间渲染阴影
         root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setContentsMargins(
+            self._shadow_margin,
+            self._shadow_margin,
+            self._shadow_margin,
+            self._shadow_margin,
+        )
         root_layout.setSpacing(0)
 
-        # 最外层容器（四个角 12px 圆角，内边距 8px）
+        # 最外层容器（QSS 已带 border-radius:12px + 主题背景色）
         outer = QFrame()
         outer.setObjectName("outerContainer")
         self.main_layout = QVBoxLayout(outer)
         self.main_layout.setContentsMargins(8, 8, 8, 8)
         self.main_layout.setSpacing(0)
+
+        # GPU 加速的阴影，替代旧 paintEvent 中手绘的 5 层同心圆角矩形
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 50))
+        outer.setGraphicsEffect(shadow)
 
         root_layout.addWidget(outer)
 
@@ -300,37 +328,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"就绪  |  {time_str}")
 
-    def paintEvent(self, event) -> None:
-        """绘制圆角窗口及柔和阴影"""
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        sm = self._shadow_margin
-        content_rect = QRectF(self.rect()).adjusted(sm, sm, -sm, -sm)
-
-        # 绘制阴影 — 多层同心圆角矩形，从外到内逐渐变深
-        steps = self._shadow_blur
-        for i in range(steps, 0, -1):
-            offset = sm * i / steps
-            alpha = int(self._shadow_opacity * ((1 - i / steps) ** 1.5))
-            if alpha < 1:
-                continue
-            path = QPainterPath()
-            path.addRoundedRect(
-                content_rect.adjusted(-offset, -offset, offset, offset),
-                self._corner_radius,
-                self._corner_radius,
-            )
-            painter.fillPath(path, QColor(0, 0, 0, alpha))
-
-        # 绘制窗口内容背景
-        path = QPainterPath()
-        path.addRoundedRect(content_rect, self._corner_radius, self._corner_radius)
-        theme = ThemeManager.current_theme()
-        painter.fillPath(path, QColor(theme.background))
-
-        event.accept()
-
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """鼠标按下事件（用于窗口拖拽）"""
         if event.button() == Qt.LeftButton:
@@ -416,7 +413,8 @@ class MainWindow(QMainWindow):
 
         # 左侧按钮
         self.run_btn = create_button("执行", btn_type="primary", min_width=110, font_size=13)
-        self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机")
+        self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机 (Ctrl+R)")
+        self.run_btn.setShortcut("Ctrl+R")
         self.run_btn.clicked.connect(self.on_run_once)
         combined_layout.addWidget(self.run_btn)
 
@@ -468,33 +466,13 @@ class MainWindow(QMainWindow):
         qss = StyleManager.get_global_stylesheet()
         self.setStyleSheet(qss)
 
-    def _log_write(self, text: str) -> None:
-        """写入日志（线程安全）"""
-        if text.strip():
-            QTimer.singleShot(0, lambda: self._append_log(text))
-
-    def _append_log(self, text: str) -> None:
-        """追加日志到文本框"""
-        if not self.log_text:
-            return
-
-        level = "INFO"
-        if "ERROR" in text or "出错" in text:
-            level = "ERROR"
-        elif "WARNING" in text or "警告" in text:
-            level = "WARNING"
-        elif "CRITICAL" in text:
-            level = "CRITICAL"
-        elif "DEBUG" in text:
-            level = "DEBUG"
-
-        self.log_text.append_colored(text.strip(), level)
-
     def _set_buttons_enabled(self, enabled: bool) -> None:
-        """设置按钮可用状态"""
+        """设置按钮可用状态，并切换执行按钮的 loading 文案"""
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
+        # loading 态：禁用时显示运行中提示，启用时恢复"执行"
+        self.run_btn.setText("执行" if enabled else "⟳ 运行中...")
 
     def run_on_start(self) -> None:
         """启动时自动执行一次"""
@@ -553,9 +531,11 @@ class MainWindow(QMainWindow):
         if success:
             self.footer_status.setText("所有任务执行完成")
             info("main", "任务链执行成功")
+            self._tray_notify("校园网自动登录", "所有任务执行完成")
         else:
             self.footer_status.setText("任务链执行完成，部分任务失败")
             info("main", "任务链执行完成，但有任务失败")
+            self._tray_notify("校园网自动登录", "部分任务执行失败，请查看日志")
 
     def _on_chain_error(self, results: list) -> None:
         """任务链出错回调"""
@@ -719,8 +699,56 @@ class MainWindow(QMainWindow):
         dialog = CalendarDialog(self)
         dialog.exec()
 
+    def _setup_tray(self) -> None:
+        """创建系统托盘图标和菜单"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            info("main", "系统托盘不可用")
+            return
+
+        icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
+        self._tray_icon = QSystemTrayIcon(icon, self)
+        self._tray_icon.setToolTip("校园网自动登录")
+
+        tray_menu = QMenu()
+        show_action = tray_menu.addAction("显示主窗口")
+        show_action.triggered.connect(self._tray_show)
+        tray_menu.addSeparator()
+        quit_action = tray_menu.addAction("退出")
+        quit_action.triggered.connect(self._real_close)
+
+        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.activated.connect(self._on_tray_activated)
+        self._tray_icon.show()
+
+    def _tray_show(self) -> None:
+        """从托盘恢复显示窗口"""
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def _tray_notify(self, title: str, message: str) -> None:
+        """发送系统托盘通知气泡"""
+        if hasattr(self, "_tray_icon") and self._tray_icon.isVisible():
+            self._tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 3000)
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """托盘图标双击/单击事件"""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._tray_show()
+
+    def _real_close(self) -> None:
+        """真实退出程序（清理并关闭）"""
+        self._force_quit = True
+        self.close()
+
     def closeEvent(self, event) -> None:
-        """关闭窗口事件"""
+        """关闭窗口事件 —— 最小化到系统托盘，而非退出"""
+        if not self._force_quit and hasattr(self, "_tray_icon") and self._tray_icon.isVisible():
+            self.hide()
+            self._tray_notify("校园网自动登录", "程序已最小化到系统托盘，右键可退出")
+            event.ignore()
+            return
+
         if self.task_executor:
             self.task_executor.cancel_all()
             self.task_executor.shutdown(wait=False)
@@ -740,7 +768,3 @@ class MainWindow(QMainWindow):
 
         sys.stdout = sys.__stdout__
         event.accept()
-
-    def log_write(self, text: str) -> None:
-        """写入日志（外部调用）"""
-        self._log_write(text)

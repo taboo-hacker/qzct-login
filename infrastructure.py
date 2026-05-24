@@ -247,23 +247,24 @@ def warning(module_name: str, message: str, exc_info: bool = False) -> None:
 
 
 def error(module_name: str, message: str, exc_info: bool = True) -> None:
-    """记录 ERROR 级别日志"""
-    if logger:
-        exc_type = sys.exc_info()[0]
-        if exc_info and exc_type is not None:
-            logger.error(module_name, message, exc_info=True)
-        else:
-            logger.error(module_name, message, exc_info=False)
+    """记录 ERROR 级别日志
+
+    exc_info 默认 True，但只有在 except 块内（sys.exc_info()[0] 不为 None）
+    时才真正附加堆栈。在非异常上下文调用 error() 也不会触发 loguru 的
+    "no active exception" 警告。
+    """
+    if not logger:
+        return
+    has_active_exception = sys.exc_info()[0] is not None
+    logger.error(module_name, message, exc_info=exc_info and has_active_exception)
 
 
 def critical(module_name: str, message: str, exc_info: bool = True) -> None:
     """记录 CRITICAL 级别日志"""
-    if logger:
-        exc_type = sys.exc_info()[0]
-        if exc_info and exc_type is not None:
-            logger.critical(module_name, message, exc_info=True)
-        else:
-            logger.critical(module_name, message, exc_info=False)
+    if not logger:
+        return
+    has_active_exception = sys.exc_info()[0] is not None
+    logger.critical(module_name, message, exc_info=exc_info and has_active_exception)
 
 
 class StreamRedirector:

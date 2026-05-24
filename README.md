@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.1.0](https://img.shields.io/badge/Version-1.1.0-blue.svg)](pyproject.toml)
+[![Version: 1.3.0](https://img.shields.io/badge/Version-1.3.0-blue.svg)](pyproject.toml)
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -118,6 +118,25 @@ qzct-login/
 - [代码 Wiki](CODE_WIKI.md) - 项目架构和 API 文档
 
 ## 🔄 更新日志
+
+### v1.3.0 (2026-05-24)
+
+- ✨ 新增系统托盘 — 关闭最小化、双击恢复、任务完成气泡通知
+- ✨ 新增暗色主题切换持久化（启动时自动恢复）
+- ✨ 新增键盘快捷键 — Ctrl+R 执行、Ctrl+, 设置、Ctrl+K 日历、F1 关于
+- ✨ 集成 chinese-calendar 作为 2027 年起的法定假日兜底
+- 🔧 并发框架重构 — 移除 Queue+QTimer 轮询，改用 Qt 原生跨线程信号
+- 🔧 拆出 ConfigManager(dict 子类) — 线程安全 + 浅拷贝 snapshot 替代 deepcopy
+- 🔧 PBKDF2 600k 迭代移到后台线程，启动不再卡 UI
+- 🔧 WiFi 重试改指数退避；登录请求 timeout 改 (3,10) 分离 connect/read
+- 🔧 临时 WiFi profile 限定 `~/.qzct/`，netsh 加载后即写即删
+- 🔧 窗口阴影从 paintEvent 手绘改 QGraphicsDropShadowEffect GPU 加速
+- 🔧 system_core 模块解耦 Qt 依赖（函数内延迟导入）
+- 🔧 业务函数抛结构化异常（WiFiProfileError / CampusAuthError / JSONPParseError）
+- 🔧 constants.py / exceptions.py 在 business.py 中落地
+- 🔧 删除手工阴影、Queue 协议、log_write 等死代码（净减约 100 行）
+- 🐛 自定义规则分支不再被 chinesecalendar 兜底覆盖（用户意图优先）
+- 🧪 修复 5 个 baseline 测试失败，87/87 全部通过
 
 ### v1.2.0 (2026-05-05)
 

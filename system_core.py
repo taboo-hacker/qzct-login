@@ -6,11 +6,20 @@ import os
 import threading
 
 from cryptography.fernet import Fernet
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from lunar_python import Solar
-from PyQt5.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
+
+
+def _lazy_import_qt():
+    """延迟导入 Qt —— 避免 system_core 在模块加载时硬耦合 PyQt5。
+
+    所有需要 QInputDialog / QMessageBox 的函数在运行时调用此 helper，
+    使得 core 层在不导入 Qt 的情况下独立可测。
+    """
+    from PyQt5.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
+
+    return QApplication, QInputDialog, QLineEdit, QMessageBox
 
 from infrastructure import error, info
 
@@ -42,49 +51,6 @@ SOLAR_FESTIVALS = {
     (8, 1): "建军节",
     (10, 1): "国庆节",
 }
-
-
-def get_simplified_yi_ji(date):
-    """
-    获取简化版宜忌信息
-
-    Args:
-        date (datetime.date): 公历日期
-
-    Returns:
-        dict: 包含宜和忌的字典
-    """
-    year, month, day = date.year, date.month, date.day
-    hash_val = year * 10000 + month * 100 + day
-    yi_options = [
-        "嫁娶",
-        "出行",
-        "搬家",
-        "开市",
-        "安床",
-        "祭祀",
-        "祈福",
-        "动土",
-        "破土",
-        "安葬",
-        "开光",
-    ]
-    ji_options = [
-        "嫁娶",
-        "出行",
-        "搬家",
-        "开市",
-        "安床",
-        "祭祀",
-        "祈福",
-        "动土",
-        "破土",
-        "安葬",
-        "开光",
-    ]
-    yi = yi_options[: hash_val % 5 + 1]
-    ji = [item for item in ji_options if item not in yi][: hash_val % 5 + 1]
-    return {"宜": yi, "忌": ji}
 
 
 class LunarUtils:
@@ -181,7 +147,8 @@ class LunarUtils:
             return {"宜": yi, "忌": ji}
         except Exception as e:
             error("system_core", f"获取宜忌信息失败：{e}")
-            return get_simplified_yi_ji(date)
+            # lunar-python 失败时返回空字典，不再伪造哈希随机数据
+            return {"宜": [], "忌": []}
 
     @staticmethod
     def get_lunar_info(date):
@@ -273,6 +240,9 @@ def generate_derived_key_from_master_password(master_password, salt=None):
     """
     从主密码生成派生密钥
 
+    PBKDF2 600k 迭代在后台线程执行，主线程用 QEventLoop 保持 UI 响应。
+    如果 Qt 尚未初始化（CLI 环境），直接同步执行。
+
     Args:
         master_password (str): 主密码
         salt (bytes, optional): 盐值
@@ -280,17 +250,41 @@ def generate_derived_key_from_master_password(master_password, salt=None):
     Returns:
         tuple: (key, salt) 生成的派生密钥和使用的盐值
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     if salt is None:
         salt = load_salt()
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_do_derive_key, master_password, salt)
+
+    try:
+        from PyQt5.QtCore import QEventLoop
+        from PyQt5.QtWidgets import QApplication
+
+        if QApplication.instance() is not None:
+            loop = QEventLoop()
+            future.add_done_callback(lambda f: loop.quit())
+            if not future.done():
+                loop.exec()
+        else:
+            future.result()  # 无 Qt 环境，直接同步等待
+    except ImportError:
+        future.result()  # Qt 不可用，直接同步等待
+
+    executor.shutdown(wait=False)
+    return future.result(), salt
+
+
+def _do_derive_key(master_password: str, salt: bytes) -> bytes:
+    """在后台线程执行 PBKDF2 密钥派生。"""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
         salt=salt,
         iterations=600000,
-        backend=default_backend(),
     )
-    key = base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
-    return key, salt
+    return base64.urlsafe_b64encode(kdf.derive(master_password.encode()))
 
 
 def save_derived_key(key):
@@ -325,6 +319,8 @@ def prompt_for_master_password():
     Returns:
         str: 主密码
     """
+    QApplication, QInputDialog, QLineEdit, QMessageBox = _lazy_import_qt()
+
     app = QApplication.instance()
     if not app:
         app = QApplication([])
@@ -368,6 +364,8 @@ def prompt_for_verify_master_password():
     Returns:
         str: 主密码
     """
+    QApplication, QInputDialog, QLineEdit, QMessageBox = _lazy_import_qt()
+
     app = QApplication.instance()
     if not app:
         app = QApplication([])
@@ -548,6 +546,7 @@ def load_and_update_encryption(config):
         return master_password, old_derived_key
     except Exception as e:
         error("system_core", f"解密主密码失败：{e}")
+        _, _, _, QMessageBox = _lazy_import_qt()
         reply = QMessageBox.question(
             None,
             "解密失败",
@@ -578,6 +577,7 @@ DEFAULT_CONFIG = {
     "SHUTDOWN_HOUR": 23,
     "SHUTDOWN_MIN": 0,
     "AUTOSTART": False,
+    "THEME": "light",
     "SHOW_LUNAR_CALENDAR": True,
     "LUNAR_DISPLAY_FORMAT": 0,
     "HOLIDAY_PERIODS": [
@@ -625,23 +625,87 @@ ISP_MAPPING = {"cmcc": "@cmcc", "telecom": "@telecom", "unicom": "@unicom", "loc
 
 WEEKDAY_MAPPING = {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五", 5: "周六", 6: "周日"}
 
-global_config = copy.deepcopy(DEFAULT_CONFIG)
+class ConfigManager(dict):
+    """线程安全配置管理器，dict 子类 —— 现有代码无需改动即可获得线程安全。
+
+    对可变值（list/dict）的 get/__getitem__ 自动返回浅拷贝，防止意外修改
+    原始配置。简单值（str/int/bool）直接返回，零拷贝开销。
+
+    snapshot() 返回浅拷贝的 dict，替代原来的 copy.deepcopy(global_config)，
+    用于工作线程一次性读取多个配置项。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._config_lock = threading.RLock()
+
+    # ---- 读操作 ----
+
+    def __getitem__(self, key):
+        with self._config_lock:
+            val = super().__getitem__(key)
+        return self._clone_if_mutable(val)
+
+    def get(self, key, default=None):
+        with self._config_lock:
+            val = super().get(key, default)
+        return self._clone_if_mutable(val)
+
+    def snapshot(self) -> dict:
+        """返回配置的浅拷贝。工作线程应使用此方法批量读取配置，
+        避免逐次 .get() 持锁多次。浅拷贝远快于原来的 deepcopy。"""
+        with self._config_lock:
+            return dict(self)
+
+    # ---- 写操作 ----
+
+    def __setitem__(self, key, value):
+        with self._config_lock:
+            super().__setitem__(key, value)
+
+    def update(self, other=None, **kwargs):
+        with self._config_lock:
+            super().update(other, **kwargs)
+
+    def clear(self):
+        with self._config_lock:
+            super().clear()
+
+    def pop(self, key, *args):
+        with self._config_lock:
+            return super().pop(key, *args)
+
+    def replace_all(self, new_config: dict) -> None:
+        """原子性地替换整个配置（clear + update 在一次锁内完成）。"""
+        with self._config_lock:
+            super().clear()
+            super().update(new_config)
+
+    # ---- 内部 ----
+
+    @staticmethod
+    def _clone_if_mutable(val):
+        """列表和字典返回浅拷贝，防止调用方意外修改原始配置。"""
+        if isinstance(val, (dict, list)):
+            return val.copy()  # 对 list 是浅拷贝，对 dict 也是浅拷贝
+        return val
+
+
+global_config = ConfigManager(copy.deepcopy(DEFAULT_CONFIG))
 current_derived_key = None
-_config_lock = threading.Lock()
 
 
 def get_config_snapshot():
     """
-    获取配置的线程安全快照（深拷贝）
+    获取配置的线程安全快照（浅拷贝）
 
-    工作线程在读取配置时应使用此函数而非直接访问 global_config，
-    避免与主线程（UI）发生竞态条件。
+    ConfigManager 的 snapshot() 返回浅拷贝，比原 deepcopy 快一个数量级。
+    工作线程在读取配置时应使用此函数。
 
     Returns:
-        dict: 配置的深拷贝
+        dict: 配置的浅拷贝
     """
-    with _config_lock:
-        return copy.deepcopy(global_config)
+    return global_config.snapshot()
 
 
 def load_config():
@@ -707,15 +771,12 @@ def load_config():
             save_config()
             info("system_core", f"未找到配置文件，创建默认配置 {CONFIG_FILE}")
 
-        with _config_lock:
-            global_config.clear()
-            global_config.update(new_config)
+        global_config.replace_all(new_config)
 
     except Exception as e:
         error("system_core", f"加载配置失败，使用默认配置：{e}")
-        with _config_lock:
-            global_config.clear()
-            global_config.update(copy.deepcopy(DEFAULT_CONFIG))
+        global_config.replace_all(copy.deepcopy(DEFAULT_CONFIG))
+        _, _, _, QMessageBox = _lazy_import_qt()
         QMessageBox.warning(
             None,
             "配置加载失败",
@@ -731,8 +792,7 @@ def save_config():
         bool: 保存是否成功
     """
     try:
-        with _config_lock:
-            config_to_save = copy.deepcopy(global_config)
+        config_to_save = copy.deepcopy(global_config.snapshot())
 
         decrypt_failed = config_to_save.pop("_DECRYPT_FAILED_FIELDS", [])
 
@@ -754,6 +814,7 @@ def save_config():
         return True
     except Exception as e:
         error("system_core", f"保存配置失败：{e}")
+        _, _, _, QMessageBox = _lazy_import_qt()
         QMessageBox.critical(None, "错误", f"保存配置失败：{e}")
         return False
 
@@ -804,9 +865,32 @@ def change_master_password(old_password, new_password):
 # ==========================================
 # 日期判断模块
 # ==========================================
+def _chinese_calendar_is_holiday(date) -> bool:
+    """chinesecalendar 是否为法定假日。数据不可用时返回 False。"""
+    try:
+        import chinese_calendar as chinesecalendar
+
+        return chinesecalendar.is_holiday(date)
+    except (ImportError, NotImplementedError):
+        return False
+
+
+def _chinese_calendar_is_workday(date) -> bool:
+    """chinesecalendar 是否为工作日（含调休上班日）。数据不可用时返回 False。"""
+    try:
+        import chinese_calendar as chinesecalendar
+
+        return chinesecalendar.is_workday(date)
+    except (ImportError, NotImplementedError):
+        return False
+
+
 def should_work_today(check_date=None):
     """
     判断指定日期是否需要执行自动化任务
+
+    判断优先级：硬编码调休日 > 硬编码节假日 > chinesecalendar > 周末规则。
+    硬编码数据覆盖学校特有假期（寒暑假），chinesecalendar 作为未来的法定假日兜底。
 
     Args:
         check_date (datetime.date, optional): 要检查的日期，默认为今天
@@ -819,6 +903,7 @@ def should_work_today(check_date=None):
     today = check_date if check_date is not None else datetime.date.today()
     date_rules = global_config.get("DATE_RULES", DEFAULT_CONFIG["DATE_RULES"])
 
+    # 1. 硬编码调休上班日（优先级最高）
     compensatory_days = [
         parse_date_str(d)
         for d in global_config.get("COMPENSATORY_WORKDAYS", [])
@@ -827,33 +912,32 @@ def should_work_today(check_date=None):
     if today in compensatory_days:
         return True
 
+    # 2. 自定义规则分支：用户明确启用了自定义规则，完全遵守用户配置，
+    #    不引入 chinesecalendar 兜底（否则覆盖用户意图）。
     if date_rules.get("ENABLE_CUSTOM_RULE", False):
-        custom_work_periods = date_rules.get("CUSTOM_WORKDAY_PERIODS", [])
-        for period in custom_work_periods:
+        for period in date_rules.get("CUSTOM_WORKDAY_PERIODS", []):
             if is_date_in_period(today, period):
                 return True
-
-        custom_holiday_periods = date_rules.get("CUSTOM_HOLIDAY_PERIODS", [])
-        for period in custom_holiday_periods:
+        for period in date_rules.get("CUSTOM_HOLIDAY_PERIODS", []):
             if is_date_in_period(today, period):
                 return False
 
         weekday = today.weekday()
         weekly_execute_days = date_rules.get("WEEKLY_EXECUTE_DAYS", [0, 1, 2, 3, 4])
-        if weekday in weekly_execute_days:
-            return True
-        else:
+        return weekday in weekly_execute_days
+
+    # 3. 基础规则分支（使用硬编码节假日 + chinesecalendar 兜底）
+    base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])
+    for period in base_holiday_periods:
+        if is_date_in_period(today, period):
             return False
 
-    else:
-        base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])
-        for period in base_holiday_periods:
-            if is_date_in_period(today, period):
-                return False
+    # chinesecalendar 法定假日兜底（覆盖硬编码未包含的年份）
+    if _chinese_calendar_is_holiday(today):
+        return False
+    # chinesecalendar 调休上班日兜底
+    if _chinese_calendar_is_workday(today):
+        return True
 
-        weekday = today.weekday()
-        weekly_execute_days = [0, 1, 2, 3, 4]
-        if weekday in weekly_execute_days:
-            return True
-        else:
-            return False
+    weekday = today.weekday()
+    return weekday in [0, 1, 2, 3, 4]

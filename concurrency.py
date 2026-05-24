@@ -1,19 +1,10 @@
 import functools
-import logging
 import os
-import queue
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable, Dict, List, Optional
 
-from PyQt5.QtCore import QObject, QTimer, pyqtSignal
-
-
-class _TaskMessage:
-    def __init__(self, msg_type: str, task_name: str = "", data=None):
-        self.msg_type = msg_type
-        self.task_name = task_name
-        self.data = data
+from PyQt5.QtCore import QObject, pyqtSignal
 
 
 class TaskContext:
@@ -63,62 +54,25 @@ class TaskExecutor(QObject):
         self._chain_results: Dict = {}
         self._chain_on_complete: Optional[Callable] = None
 
-        self._message_queue: queue.Queue = queue.Queue()
-
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setSingleShot(False)
-        self._poll_timer.setInterval(50)
-        self._poll_timer.timeout.connect(self._process_messages)
-        self._poll_timer.start()
-
     @property
     def max_workers(self) -> int:
         return self._max_workers
 
-    def _enqueue(self, msg: _TaskMessage):
-        self._message_queue.put(msg)
-
-    def _process_messages(self):
-        while not self._message_queue.empty():
-            try:
-                msg = self._message_queue.get_nowait()
-            except queue.Empty:
-                break
-
-            if msg.msg_type == "log":
-                try:
-                    from infrastructure import info
-
-                    info("concurrency", f"[{msg.task_name}] {msg.data}")
-                except Exception:
-                    logging.info(f"[{msg.task_name}] {msg.data}")
-            elif msg.msg_type == "finished":
-                self.finished.emit(msg.task_name, msg.data)
-            elif msg.msg_type == "error":
-                self.error.emit(msg.task_name, msg.data)
-            elif msg.msg_type == "progress":
-                self.progress.emit(msg.task_name, msg.data)
-            elif msg.msg_type == "all_finished":
-                self.all_finished.emit(msg.data)
-
-    def _emit_log(self, task_name: str, message: str):
-        self._enqueue(_TaskMessage("log", task_name, message))
-
-    def _emit_progress(self, task_name: str, percent: int):
-        self._enqueue(_TaskMessage("progress", task_name, percent))
-
     def submit(self, func: Callable, task_name: str = "Unknown", *args, **kwargs) -> Future:
+        # started 在主线程发出（submit 由主线程调用）
         self.started.emit(task_name)
 
         ctx = TaskContext(task_name)
         self._contexts[task_name] = ctx
 
         def wrapped():
+            # 工作线程：finished / error 是 pyqtSignal，跨线程时 Qt 自动用
+            # QueuedConnection 投递到接收者所在线程，无需手动队列。
             try:
                 result = func(ctx, *args, **kwargs)
-                self._enqueue(_TaskMessage("finished", task_name, result))
+                self.finished.emit(task_name, result)
             except Exception as e:
-                self._enqueue(_TaskMessage("error", task_name, str(e)))
+                self.error.emit(task_name, str(e))
 
         future = self._executor.submit(wrapped)
         self._tasks[task_name] = future
@@ -137,7 +91,7 @@ class TaskExecutor(QObject):
         if self._chain_index >= len(self._chain_tasks) or self._cancelled:
             if self._chain_on_complete:
                 self._chain_on_complete(not self._cancelled, self._chain_results)
-            self._enqueue(_TaskMessage("all_finished", "", not self._cancelled))
+            self.all_finished.emit(not self._cancelled)
             return
 
         task_info = self._chain_tasks[self._chain_index]
@@ -164,19 +118,21 @@ class TaskExecutor(QObject):
         total = len(tasks)
 
         def on_task_done(future: Future, task_name: str):
+            # add_done_callback 由完成 future 的工作线程调用。
+            # finished / error 是跨线程信号，Qt 会投递到主线程。
             try:
                 result = future.result()
                 results[task_name] = result
-                self._enqueue(_TaskMessage("finished", task_name, result))
+                self.finished.emit(task_name, result)
             except Exception as e:
                 results[task_name] = {"error": str(e)}
-                self._enqueue(_TaskMessage("error", task_name, str(e)))
+                self.error.emit(task_name, str(e))
             finally:
                 completed_count[0] += 1
                 if completed_count[0] >= total:
                     if on_complete:
                         on_complete(not self._cancelled, results)
-                    self._enqueue(_TaskMessage("all_finished", "", not self._cancelled))
+                    self.all_finished.emit(not self._cancelled)
 
         for i, task_info in enumerate(tasks):
             func = task_info["func"]
@@ -210,7 +166,6 @@ class TaskExecutor(QObject):
         return len(not_done) == 0
 
     def shutdown(self, wait: bool = True):
-        self._poll_timer.stop()
         self._executor.shutdown(wait=wait)
 
 

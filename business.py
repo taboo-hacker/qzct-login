@@ -10,6 +10,14 @@ import requests
 from requests.exceptions import RequestException
 
 from concurrency import TaskContext, task
+from constants import CAMPUS_LOGIN_CONFIG, CAMPUS_LOGIN_HEADERS, CONFIG_DIR
+from exceptions import (
+    CampusAuthError,
+    CampusNetworkError,
+    JSONPParseError,
+    WiFiConnectionError,
+    WiFiProfileError,
+)
 from infrastructure import error, info
 from system_core import ISP_MAPPING, get_config_snapshot, should_work_today
 
@@ -115,9 +123,86 @@ def create_windows_wifi_profile(wifi_name: str, password: str) -> str:
     return profile_xml
 
 
+def _wifi_profile_exists(wifi_name: str) -> bool:
+    """检查 Windows 是否已保存该 WiFi 的 profile。
+
+    若已存在，可直接 connect 而不需要再写入明文密码文件。
+
+    Args:
+        wifi_name (str): WiFi 网络名称（SSID）
+
+    Returns:
+        bool: True 表示已存在 profile，False 表示不存在
+    """
+    try:
+        result = subprocess.check_output(
+            ["netsh", "wlan", "show", "profile"], encoding="gbk", errors="ignore"
+        )
+        return wifi_name in result
+    except subprocess.CalledProcessError:
+        return False
+
+
+def _do_connect_wifi(wifi_name: str, password: str) -> None:
+    """实际执行 WiFi 连接，失败时 raise WiFiError 子类。
+
+    分离的内部函数：相比 ``return False``，结构化异常能告诉调用方
+    *为什么* 失败（profile 写入失败 / netsh 调用失败 / 连接超时），便于
+    将来 UI 层做不同提示，或测试层 assertRaises。
+    """
+    if _wifi_profile_exists(wifi_name):
+        info("business", f"使用已有 WiFi profile：{wifi_name}")
+    else:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        tmp_path = os.path.join(CONFIG_DIR, f".wifi_profile_{os.getpid()}.xml")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(create_windows_wifi_profile(wifi_name, password))
+            info("business", "创建临时 WiFi profile")
+
+            try:
+                subprocess.run(
+                    ["netsh", "wlan", "add", "profile", f"filename={tmp_path}", "user=all"],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            except subprocess.CalledProcessError as e:
+                raise WiFiProfileError(f"加载 WiFi profile 失败：{wifi_name}", str(e)) from e
+        finally:
+            # netsh add 完成后密码已入 Windows 凭据存储，临时文件无需保留——
+            # 立即删除，缩短明文密码在磁盘上停留的时间窗口。
+            if os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                    info("business", "已清理临时 profile 文件")
+                except OSError as e:
+                    error("business", f"清理临时文件失败：{e}")
+
+    info("business", f"发起WiFi连接请求：{wifi_name}")
+    try:
+        subprocess.run(
+            ["netsh", "wlan", "connect", "name=" + wifi_name],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        raise WiFiConnectionError(f"WiFi 连接命令失败：{wifi_name}", str(e)) from e
+
+    info("business", "等待WiFi连接稳定...")
+    time.sleep(5)
+
+    if not is_wifi_connected(wifi_name):
+        raise WiFiConnectionError(f"WiFi 已发起连接但未稳定连上：{wifi_name}")
+
+
 def connect_wifi(wifi_name: str, password: str) -> bool:
     """
-    连接到指定的WiFi网络
+    连接到指定的WiFi网络（向后兼容包装：捕获异常并返回 bool）
+
+    内部使用 ``_do_connect_wifi`` 抛结构化异常；本函数为旧调用方
+    （UI、测试）保留 ``bool`` 返回。新代码建议直接调用 ``_do_connect_wifi``。
 
     Args:
         wifi_name (str): WiFi网络名称
@@ -126,59 +211,19 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
     Returns:
         bool: True表示连接成功（或已连接），False表示连接失败
     """
-    temp_file = None
     try:
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".xml", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(create_windows_wifi_profile(wifi_name, password))
-            temp_file = f.name
-
-        info("business", f"创建临时WiFi配置文件：{temp_file}")
-
-        subprocess.run(
-            ["netsh", "wlan", "add", "profile", f"filename={temp_file}", "user=all"],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        info("business", f"发起WiFi连接请求：{wifi_name}")
-        subprocess.run(
-            ["netsh", "wlan", "connect", "name=" + wifi_name],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        if temp_file and os.path.exists(temp_file):
-            os.unlink(temp_file)
-            info("business", f"清理临时配置文件：{temp_file}")
-
-        info("business", "等待WiFi连接稳定...")
-        time.sleep(5)
-
-        connected = is_wifi_connected(wifi_name)
-        if connected:
-            info("business", f"WiFi连接成功：{wifi_name}")
-        else:
-            error("business", f"WiFi连接失败：{wifi_name}")
-        return connected
-    except subprocess.CalledProcessError as e:
-        error("business", f"WiFi连接命令执行失败：{str(e)}")
+        _do_connect_wifi(wifi_name, password)
+        info("business", f"WiFi连接成功：{wifi_name}")
+        return True
+    except WiFiProfileError as e:
+        error("business", f"WiFi profile 异常：{e}")
+        return False
+    except WiFiConnectionError as e:
+        error("business", f"WiFi连接失败：{e}")
         return False
     except Exception as e:
-        error("business", f"WiFi连接异常：{str(e)}")
+        error("business", f"WiFi连接异常：{e}")
         return False
-    finally:
-        if temp_file and os.path.exists(temp_file):
-            try:
-                os.unlink(temp_file)
-                info("business", f"清理临时配置文件：{temp_file}")
-            except Exception as e:
-                error("business", f"清理临时文件失败：{str(e)}")
 
 
 def auto_connect_wifi(cfg=None):
@@ -218,8 +263,10 @@ def auto_connect_wifi(cfg=None):
             return True
 
         if retry_count < max_retry:
-            info("business", f"等待{retry_interval}秒后重试...")
-            time.sleep(retry_interval)
+            # 指数退避：1s → 2s → 4s → 8s → ... 上限 60s
+            delay = min(retry_interval * (2 ** (retry_count - 1)), 60)
+            info("business", f"等待{delay}秒后重试...")
+            time.sleep(delay)
 
     error("business", f"超过{max_retry}次重试，WiFi连接失败")
     return False
@@ -232,25 +279,37 @@ def parse_jsonp(jsonp_text: str, callback: str) -> dict:
     """
     解析JSONP格式的响应数据
 
+    使用字符串切片定位 callback( 和最后一个 )，比正则简洁可靠。
+
     Args:
         jsonp_text (str): JSONP格式的响应文本
         callback (str): JSONP回调函数名称，如 "dr1004"
 
     Returns:
         dict: 解析后的字典数据
+
+    Raises:
+        JSONPParseError: JSONP 格式不合法或解析失败
     """
-    pattern = re.compile(f"{re.escape(callback)}\\((.*?)\\)")
-    match = pattern.search(jsonp_text)
-    if match:
-        return json.loads(match.group(1))
-    raise ValueError("JSONP格式解析失败，响应内容：" + jsonp_text[:100])
+    prefix = f"{callback}("
+    start = jsonp_text.find(prefix)
+    end = jsonp_text.rfind(")")
+    if start == -1 or end == -1 or end <= start + len(prefix):
+        raise JSONPParseError("JSONP格式解析失败", jsonp_text)
+    try:
+        return json.loads(jsonp_text[start + len(prefix) : end])
+    except json.JSONDecodeError as e:
+        raise JSONPParseError(f"JSON 解析失败：{e}", jsonp_text) from e
 
 
 def campus_login(cfg=None) -> bool:
     """
-    校园网登录函数（使用全局配置）
+    校园网登录函数（向后兼容包装：捕获异常并返回 bool）
 
-    读取全局配置中的账号信息，构建登录请求并发送到校园网认证服务器。
+    内部分类抛出：
+    - CampusNetworkError：网络层失败（超时、不可达、协议错误）
+    - JSONPParseError：服务器返回格式异常
+    - CampusAuthError：账号/密码错误，认证失败
 
     Args:
         cfg (dict, optional): 配置字典快照，默认使用 get_config_snapshot()
@@ -263,81 +322,72 @@ def campus_login(cfg=None) -> bool:
     isp_type = cfg.get("ISP_TYPE", "telecom")
     isp_suffix = ISP_MAPPING.get(isp_type, "@telecom")
 
-    config = {
-        "username": cfg.get("USERNAME", ""),
-        "password": cfg.get("PASSWORD", ""),
-        "isp_suffix": isp_suffix,
-        "login_url": "http://192.168.51.2:801/eportal/portal/login",
+    callback = CAMPUS_LOGIN_CONFIG["callback"]
+    login_url = CAMPUS_LOGIN_CONFIG["login_url"]
+
+    params = {
+        "callback": callback,
+        "login_method": "1",
+        "user_account": f"{cfg.get('USERNAME', '')}{isp_suffix}",
+        "user_password": cfg.get("PASSWORD", ""),
         "wlan_user_ip": cfg.get("WAN_IP", ""),
+        "wlan_user_ipv6": "",
         "wlan_user_mac": "",
         "wlan_ac_ip": "",
         "wlan_ac_name": "",
-        "callback": "dr1004",
-        "v": "7213",
+        "jsVersion": CAMPUS_LOGIN_CONFIG["js_version"],
+        "terminal_type": "1",
+        "lang": "zh",
+        "v": CAMPUS_LOGIN_CONFIG["version"],
     }
 
-    HEADERS = {
-        "Accept": "*/*",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-        "Connection": "keep-alive",
-        "Referer": "http://192.168.51.2/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
-    }
+    headers = {**CAMPUS_LOGIN_HEADERS, "Referer": CAMPUS_LOGIN_CONFIG["referer"]}
 
     # 校园网认证服务器通常使用自签名证书，无法验证链
-    # 若环境支持证书验证，可将 verify 设为 True
     info("business", "注意：SSL证书验证已禁用（校园网自签名证书）")
 
-    session = requests.Session()
     try:
-        params = {
-            "callback": config["callback"],
-            "login_method": "1",
-            "user_account": f"{config['username']}{config['isp_suffix']}",
-            "user_password": config["password"],
-            "wlan_user_ip": config["wlan_user_ip"],
-            "wlan_user_ipv6": "",
-            "wlan_user_mac": config["wlan_user_mac"],
-            "wlan_ac_ip": config["wlan_ac_ip"],
-            "wlan_ac_name": config["wlan_ac_name"],
-            "jsVersion": "4.2.2",
-            "terminal_type": "1",
-            "lang": "zh",
-            "v": config["v"],
-        }
+        with requests.Session() as session:
+            info("business", f"开始发送登录请求到 {login_url}")
 
-        info("business", f"开始发送登录请求到 {config['login_url']}")
+            # timeout=(connect, read)：3秒内必须建立 TCP 连接（区分网络不可达），
+            # 一旦连上则允许服务器最多 10 秒响应（区分服务器慢）。
+            try:
+                response = session.get(
+                    url=login_url,
+                    params=params,
+                    headers=headers,
+                    verify=False,
+                    timeout=(3, 10),
+                )
+            except RequestException as e:
+                raise CampusNetworkError("校园网请求失败", _sanitize(str(e))) from e
 
-        response = session.get(
-            url=config["login_url"], params=params, headers=HEADERS, verify=False, timeout=15
-        )
-        response.encoding = "utf-8"
+            response.encoding = "utf-8"
+            info("business", f"登录请求返回状态码：{response.status_code}")
 
-        info("business", f"登录请求返回状态码：{response.status_code}")
+            result = parse_jsonp(response.text, callback)
 
-        result = parse_jsonp(response.text, config["callback"])
+            if result.get("ret_code") == 0 or result.get("result") == 1:
+                info("business", f"登录成功：{result.get('msg', '登录成功')}")
+                return True
 
-        if result.get("ret_code") == 0 or result.get("result") == 1:
-            info("business", f"登录成功：{result.get('msg', '登录成功')}")
-            return True
-        else:
-            error(
-                "business", f"登录失败：{_sanitize(result.get('msg', '未知错误'))}", exc_info=False
+            raise CampusAuthError(
+                "校园网认证失败", _sanitize(result.get("msg", "未知错误"))
             )
-            return False
 
-    except RequestException as e:
-        error("business", f"网络请求异常：{_sanitize(e)}")
+    except CampusAuthError as e:
+        error("business", f"登录失败：{e}", exc_info=False)
         return False
-    except ValueError as e:
-        error("business", f"响应解析异常：{_sanitize(e)}")
+    except CampusNetworkError as e:
+        error("business", f"网络请求异常：{e}")
+        return False
+    except JSONPParseError as e:
+        error("business", f"响应解析异常：{e}")
         return False
     except Exception as e:
         error("business", f"登录过程发生未知异常：{_sanitize(e)}")
         return False
-    finally:
-        session.close()
-        info("business", "登录会话已关闭")
 
 
 # ==========================================

@@ -34,7 +34,8 @@ class TestLunarUtils:
         assert "lunar_day" in result
         assert result["lunar_year"] == 2025
         assert result["lunar_month"] == 11
-        assert result["lunar_day"] == 12
+        # lunar-python 在 2026-01-01 公历对应农历乙巳年冬月十三
+        assert result["lunar_day"] == 13
 
     def test_get_solar_term(self):
         """测试获取节气"""
@@ -195,11 +196,16 @@ class TestDateRules:
     def test_should_work_today_weekend(self, sample_config):
         """测试周末"""
 
+        # sample_config 把 2026-01-04 设为调休工作日，与"周末休息"用例冲突；
+        # 这里清空调休列表，让测试单独检验周末规则。
+        config = sample_config.copy()
+        config["COMPENSATORY_WORKDAYS"] = []
         system_core.global_config.clear()
-        system_core.global_config.update(sample_config)
+        system_core.global_config.update(config)
 
-        saturday = datetime.date(2026, 1, 3)
-        sunday = datetime.date(2026, 1, 4)
+        # 用 2026-01-10/11 周末（chinesecalendar 也判作假日，不存在调休）
+        saturday = datetime.date(2026, 1, 10)
+        sunday = datetime.date(2026, 1, 11)
 
         assert should_work_today(saturday) is False
         assert should_work_today(sunday) is False
@@ -242,16 +248,22 @@ class TestDateRules:
             ],
             "CUSTOM_WORKDAY_PERIODS": [],
         }
+        # 自定义规则下，调休工作日不应再覆盖周末/规则；清空调休数据
+        config["COMPENSATORY_WORKDAYS"] = []
         system_core.global_config.clear()
         system_core.global_config.update(config)
 
-        wednesday = datetime.date(2026, 1, 7)
-        result = should_work_today(wednesday)
-        assert result is False
+        # 2026-01-05 周一在 CUSTOM_HOLIDAY_PERIODS 内 -> False
+        custom_holiday = datetime.date(2026, 1, 5)
+        assert should_work_today(custom_holiday) is False
 
+        # 2026-01-07 周三在 WEEKLY_EXECUTE_DAYS [0,1,2] 内 -> True
+        wednesday = datetime.date(2026, 1, 7)
+        assert should_work_today(wednesday) is True
+
+        # 2026-01-08 周四不在 WEEKLY_EXECUTE_DAYS 内 -> False
         thursday = datetime.date(2026, 1, 8)
-        result = should_work_today(thursday)
-        assert result is False
+        assert should_work_today(thursday) is False
 
 
 class TestISPMapping:
