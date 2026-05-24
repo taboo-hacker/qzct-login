@@ -1,4 +1,4 @@
-# Release Notes — v1.2.0
+# Release Notes — v1.3.0
 
 发布日期：2026-05-24
 
