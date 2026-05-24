@@ -459,28 +459,6 @@ class MainWindow(QMainWindow):
         qss = StyleManager.get_global_stylesheet()
         self.setStyleSheet(qss)
 
-    def _log_write(self, text: str) -> None:
-        """写入日志（线程安全）"""
-        if text.strip():
-            QTimer.singleShot(0, lambda: self._append_log(text))
-
-    def _append_log(self, text: str) -> None:
-        """追加日志到文本框"""
-        if not self.log_text:
-            return
-
-        level = "INFO"
-        if "ERROR" in text or "出错" in text:
-            level = "ERROR"
-        elif "WARNING" in text or "警告" in text:
-            level = "WARNING"
-        elif "CRITICAL" in text:
-            level = "CRITICAL"
-        elif "DEBUG" in text:
-            level = "DEBUG"
-
-        self.log_text.append_colored(text.strip(), level)
-
     def _set_buttons_enabled(self, enabled: bool) -> None:
         """设置按钮可用状态"""
         self.run_btn.setEnabled(enabled)
@@ -781,7 +759,3 @@ class MainWindow(QMainWindow):
 
         sys.stdout = sys.__stdout__
         event.accept()
-
-    def log_write(self, text: str) -> None:
-        """写入日志（外部调用）"""
-        self._log_write(text)

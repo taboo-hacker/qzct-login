@@ -10,7 +10,7 @@ import requests
 from requests.exceptions import RequestException
 
 from concurrency import TaskContext, task
-from constants import CONFIG_DIR
+from constants import CAMPUS_LOGIN_CONFIG, CAMPUS_LOGIN_HEADERS, CONFIG_DIR
 from infrastructure import error, info
 from system_core import ISP_MAPPING, get_config_snapshot, should_work_today
 
@@ -256,6 +256,8 @@ def parse_jsonp(jsonp_text: str, callback: str) -> dict:
     """
     解析JSONP格式的响应数据
 
+    使用字符串切片定位 callback( 和最后一个 )，比正则简洁可靠。
+
     Args:
         jsonp_text (str): JSONP格式的响应文本
         callback (str): JSONP回调函数名称，如 "dr1004"
@@ -263,11 +265,12 @@ def parse_jsonp(jsonp_text: str, callback: str) -> dict:
     Returns:
         dict: 解析后的字典数据
     """
-    pattern = re.compile(f"{re.escape(callback)}\\((.*?)\\)")
-    match = pattern.search(jsonp_text)
-    if match:
-        return json.loads(match.group(1))
-    raise ValueError("JSONP格式解析失败，响应内容：" + jsonp_text[:100])
+    prefix = f"{callback}("
+    start = jsonp_text.find(prefix)
+    end = jsonp_text.rfind(")")
+    if start == -1 or end == -1 or end <= start + len(prefix):
+        raise ValueError("JSONP格式解析失败，响应内容：" + jsonp_text[:100])
+    return json.loads(jsonp_text[start + len(prefix) : end])
 
 
 def campus_login(cfg=None) -> bool:
@@ -287,70 +290,55 @@ def campus_login(cfg=None) -> bool:
     isp_type = cfg.get("ISP_TYPE", "telecom")
     isp_suffix = ISP_MAPPING.get(isp_type, "@telecom")
 
-    config = {
-        "username": cfg.get("USERNAME", ""),
-        "password": cfg.get("PASSWORD", ""),
-        "isp_suffix": isp_suffix,
-        "login_url": "http://192.168.51.2:801/eportal/portal/login",
+    callback = CAMPUS_LOGIN_CONFIG["callback"]
+    login_url = CAMPUS_LOGIN_CONFIG["login_url"]
+
+    params = {
+        "callback": callback,
+        "login_method": "1",
+        "user_account": f"{cfg.get('USERNAME', '')}{isp_suffix}",
+        "user_password": cfg.get("PASSWORD", ""),
         "wlan_user_ip": cfg.get("WAN_IP", ""),
+        "wlan_user_ipv6": "",
         "wlan_user_mac": "",
         "wlan_ac_ip": "",
         "wlan_ac_name": "",
-        "callback": "dr1004",
-        "v": "7213",
+        "jsVersion": CAMPUS_LOGIN_CONFIG["js_version"],
+        "terminal_type": "1",
+        "lang": "zh",
+        "v": CAMPUS_LOGIN_CONFIG["version"],
     }
 
-    HEADERS = {
-        "Accept": "*/*",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-        "Connection": "keep-alive",
-        "Referer": "http://192.168.51.2/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0",
-    }
+    headers = {**CAMPUS_LOGIN_HEADERS, "Referer": CAMPUS_LOGIN_CONFIG["referer"]}
 
     # 校园网认证服务器通常使用自签名证书，无法验证链
     # 若环境支持证书验证，可将 verify 设为 True
     info("business", "注意：SSL证书验证已禁用（校园网自签名证书）")
 
-    session = requests.Session()
+    # with 上下文：自动关闭 session，无需手工 finally。
     try:
-        params = {
-            "callback": config["callback"],
-            "login_method": "1",
-            "user_account": f"{config['username']}{config['isp_suffix']}",
-            "user_password": config["password"],
-            "wlan_user_ip": config["wlan_user_ip"],
-            "wlan_user_ipv6": "",
-            "wlan_user_mac": config["wlan_user_mac"],
-            "wlan_ac_ip": config["wlan_ac_ip"],
-            "wlan_ac_name": config["wlan_ac_name"],
-            "jsVersion": "4.2.2",
-            "terminal_type": "1",
-            "lang": "zh",
-            "v": config["v"],
-        }
+        with requests.Session() as session:
+            info("business", f"开始发送登录请求到 {login_url}")
 
-        info("business", f"开始发送登录请求到 {config['login_url']}")
+            # timeout=(connect, read)：3秒内必须建立 TCP 连接（区分网络不可达），
+            # 一旦连上则允许服务器最多 10 秒响应（区分服务器慢）。
+            response = session.get(
+                url=login_url,
+                params=params,
+                headers=headers,
+                verify=False,
+                timeout=(3, 10),
+            )
+            response.encoding = "utf-8"
 
-        # timeout=(connect, read)：3秒内必须建立 TCP 连接（区分网络不可达），
-        # 一旦连上则允许服务器最多 10 秒响应（区分服务器慢）。
-        response = session.get(
-            url=config["login_url"],
-            params=params,
-            headers=HEADERS,
-            verify=False,
-            timeout=(3, 10),
-        )
-        response.encoding = "utf-8"
+            info("business", f"登录请求返回状态码：{response.status_code}")
 
-        info("business", f"登录请求返回状态码：{response.status_code}")
+            result = parse_jsonp(response.text, callback)
 
-        result = parse_jsonp(response.text, config["callback"])
+            if result.get("ret_code") == 0 or result.get("result") == 1:
+                info("business", f"登录成功：{result.get('msg', '登录成功')}")
+                return True
 
-        if result.get("ret_code") == 0 or result.get("result") == 1:
-            info("business", f"登录成功：{result.get('msg', '登录成功')}")
-            return True
-        else:
             error(
                 "business", f"登录失败：{_sanitize(result.get('msg', '未知错误'))}", exc_info=False
             )
@@ -365,9 +353,6 @@ def campus_login(cfg=None) -> bool:
     except Exception as e:
         error("business", f"登录过程发生未知异常：{_sanitize(e)}")
         return False
-    finally:
-        session.close()
-        info("business", "登录会话已关闭")
 
 
 # ==========================================

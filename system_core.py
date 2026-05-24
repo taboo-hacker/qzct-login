@@ -53,49 +53,6 @@ SOLAR_FESTIVALS = {
 }
 
 
-def get_simplified_yi_ji(date):
-    """
-    获取简化版宜忌信息
-
-    Args:
-        date (datetime.date): 公历日期
-
-    Returns:
-        dict: 包含宜和忌的字典
-    """
-    year, month, day = date.year, date.month, date.day
-    hash_val = year * 10000 + month * 100 + day
-    yi_options = [
-        "嫁娶",
-        "出行",
-        "搬家",
-        "开市",
-        "安床",
-        "祭祀",
-        "祈福",
-        "动土",
-        "破土",
-        "安葬",
-        "开光",
-    ]
-    ji_options = [
-        "嫁娶",
-        "出行",
-        "搬家",
-        "开市",
-        "安床",
-        "祭祀",
-        "祈福",
-        "动土",
-        "破土",
-        "安葬",
-        "开光",
-    ]
-    yi = yi_options[: hash_val % 5 + 1]
-    ji = [item for item in ji_options if item not in yi][: hash_val % 5 + 1]
-    return {"宜": yi, "忌": ji}
-
-
 class LunarUtils:
     """
     农历工具类，提供完整的农历功能
@@ -190,7 +147,8 @@ class LunarUtils:
             return {"宜": yi, "忌": ji}
         except Exception as e:
             error("system_core", f"获取宜忌信息失败：{e}")
-            return get_simplified_yi_ji(date)
+            # lunar-python 失败时返回空字典，不再伪造哈希随机数据
+            return {"宜": [], "忌": []}
 
     @staticmethod
     def get_lunar_info(date):
