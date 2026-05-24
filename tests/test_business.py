@@ -45,12 +45,8 @@ class TestWiFiFunctions:
 
     def test_is_wifi_connected_true(self, mock_subprocess):
         """测试 WiFi 已连接"""
-        mock_subprocess.return_value = MagicMock(
-            returncode=0,
-            stdout=b"MyWiFi\n  SSID: MyWiFi\n  State: connected",
-        )
-
-        with patch("subprocess.check_output", return_value=b"MyWiFi\nSSID: MyWiFi"):
+        # 业务代码使用 check_output(encoding='gbk')，因此返回 str，不是 bytes
+        with patch("subprocess.check_output", return_value="MyWiFi\nSSID: MyWiFi"):
             result = is_wifi_connected("MyWiFi")
             assert result is True
 
@@ -58,7 +54,7 @@ class TestWiFiFunctions:
         """测试 WiFi 未连接"""
         with patch(
             "subprocess.check_output",
-            return_value=b"OtherWiFi\nSSID: OtherWiFi",
+            return_value="OtherWiFi\nSSID: OtherWiFi",
         ):
             result = is_wifi_connected("MyWiFi")
             assert result is False

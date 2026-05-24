@@ -912,7 +912,8 @@ def should_work_today(check_date=None):
     if today in compensatory_days:
         return True
 
-    # 2. 自定义规则分支
+    # 2. 自定义规则分支：用户明确启用了自定义规则，完全遵守用户配置，
+    #    不引入 chinesecalendar 兜底（否则覆盖用户意图）。
     if date_rules.get("ENABLE_CUSTOM_RULE", False):
         for period in date_rules.get("CUSTOM_WORKDAY_PERIODS", []):
             if is_date_in_period(today, period):
@@ -923,14 +924,6 @@ def should_work_today(check_date=None):
 
         weekday = today.weekday()
         weekly_execute_days = date_rules.get("WEEKLY_EXECUTE_DAYS", [0, 1, 2, 3, 4])
-
-        # chinesecalendar 作为兜底：法定调休上班日自动覆盖
-        if weekday not in weekly_execute_days and _chinese_calendar_is_workday(today):
-            return True
-        # chinesecalendar 作为兜底：法定假日自动覆盖
-        if weekday in weekly_execute_days and _chinese_calendar_is_holiday(today):
-            return False
-
         return weekday in weekly_execute_days
 
     # 3. 基础规则分支（使用硬编码节假日 + chinesecalendar 兜底）
