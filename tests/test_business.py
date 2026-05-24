@@ -101,9 +101,11 @@ class TestCampusLogin:
 
     def test_parse_jsonp_invalid_format(self):
         """测试解析无效 JSONP 格式"""
+        from exceptions import JSONPParseError
+
         invalid_response = "not a valid jsonp response"
 
-        with pytest.raises(ValueError):
+        with pytest.raises(JSONPParseError):
             parse_jsonp(invalid_response, "dr1004")
 
     def test_campus_login_success(self, sample_config, mock_requests):
