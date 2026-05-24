@@ -79,9 +79,13 @@ class TitleMenuBar(QFrame):
         layout.addStretch()
 
         self._settings_menu = QMenu("设置", self)
-        self._settings_menu.addAction("配置设置").triggered.connect(self._parent_on_settings)
+        settings_action = self._settings_menu.addAction("配置设置")
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self._parent_on_settings)
         self._settings_menu.addSeparator()
-        self._settings_menu.addAction("任务日历").triggered.connect(self._parent_show_calendar)
+        calendar_action = self._settings_menu.addAction("任务日历")
+        calendar_action.setShortcut("Ctrl+K")
+        calendar_action.triggered.connect(self._parent_show_calendar)
         self._settings_btn = QPushButton("设置 \u25be")
         self._settings_btn.setObjectName("menuBtn")
         self._settings_btn.setFixedHeight(34)
@@ -90,7 +94,9 @@ class TitleMenuBar(QFrame):
         layout.addWidget(self._settings_btn)
 
         self._help_menu = QMenu("帮助", self)
-        self._help_menu.addAction("关于我们").triggered.connect(self._parent_show_about)
+        about_action = self._help_menu.addAction("关于我们")
+        about_action.setShortcut("F1")
+        about_action.triggered.connect(self._parent_show_about)
         self._help_btn = QPushButton("帮助 \u25be")
         self._help_btn.setObjectName("menuBtn")
         self._help_btn.setFixedHeight(34)
@@ -407,7 +413,8 @@ class MainWindow(QMainWindow):
 
         # 左侧按钮
         self.run_btn = create_button("执行", btn_type="primary", min_width=110, font_size=13)
-        self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机")
+        self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机 (Ctrl+R)")
+        self.run_btn.setShortcut("Ctrl+R")
         self.run_btn.clicked.connect(self.on_run_once)
         combined_layout.addWidget(self.run_btn)
 
@@ -460,10 +467,12 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(qss)
 
     def _set_buttons_enabled(self, enabled: bool) -> None:
-        """设置按钮可用状态"""
+        """设置按钮可用状态，并切换执行按钮的 loading 文案"""
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
+        # loading 态：禁用时显示运行中提示，启用时恢复"执行"
+        self.run_btn.setText("执行" if enabled else "⟳ 运行中...")
 
     def run_on_start(self) -> None:
         """启动时自动执行一次"""
