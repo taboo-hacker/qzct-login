@@ -4,7 +4,7 @@
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
 [![Version: 1.3.0](https://img.shields.io/badge/Version-1.3.0-blue.svg)](pyproject.toml)
-[![Python: 3.8+](https://img.shields.io/badge/Python-3.8%2B-brightgreen.svg)](pyproject.toml)
+[![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -33,7 +33,7 @@ QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的
 
 | 技术 | 说明 |
 | --- | --- |
-| Python 3.8+ | 编程语言 |
+| Python 3.10+ | 编程语言 |
 | PyQt5 | GUI 框架 |
 | requests | 网络请求 |
 | cryptography | 密码加密 |
@@ -42,7 +42,13 @@ QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的
 
 ## 🚀 快速开始
 
-### 安装
+### 方式一：下载可执行文件（推荐普通用户）
+
+1. 前往 [Releases 页面](https://github.com/taboo-hacker/qzct-login/releases) 下载最新的 `qzct-login.exe`
+2. 双击运行即可，无需安装 Python 环境
+3. （可选）校验文件完整性：`certutil -hashfile qzct-login.exe SHA256`
+
+### 方式二：从源码运行
 
 ```bash
 # 克隆仓库
@@ -72,7 +78,10 @@ black . && isort .
 ruff check .
 
 # 类型检查
-mypy .
+mypy core infra services gui utils main.py
+
+# 本地构建 .exe
+python build.py --clean --verify
 ```
 
 ## 📁 项目结构
@@ -80,34 +89,45 @@ mypy .
 ```
 qzct-login/
 ├── main.py                     # 程序入口
-├── business.py                 # 业务逻辑（WiFi、登录、关机）
-├── system_core.py              # 系统核心（配置、加密、日期、农历）
-├── infrastructure.py           # 基础设施（日志、线程池、工具）
-├── concurrency.py              # 并发框架（TaskChain + TaskExecutor）
-├── constants.py                # 常量配置
-├── exceptions.py               # 自定义异常
+├── build.py                    # 本地构建脚本
+├── qzct-login.spec             # PyInstaller 打包配置
+├── core/                       # 核心业务逻辑
+│   ├── config.py               # 配置管理
+│   ├── constants.py            # 常量定义
+│   ├── exceptions.py           # 自定义异常
+│   ├── encryption.py           # 加密模块
+│   ├── date_rules.py           # 日期规则
+│   ├── holidays.py             # 假期数据
+│   └── lunar.py                # 农历功能
+├── infra/                      # 基础设施
+│   ├── concurrency.py          # 并发框架（TaskChain + TaskExecutor）
+│   ├── logging.py              # 日志系统
+│   └── date_utils.py           # 日期工具
+├── services/                   # 业务服务
+│   ├── campus_login.py         # 校园网登录
+│   ├── wifi.py                 # WiFi 连接
+│   ├── shutdown.py             # 定时关机
+│   └── tasks.py                # 任务链
 ├── gui/
 │   ├── main_window.py          # 主窗口
-│   ├── style_manager.py        # QSS 样式管理器
+│   ├── tray_manager.py         # 系统托盘管理
+│   ├── encryption_gui.py       # 加密交互弹窗
+│   ├── log_sink.py             # GUI 日志转发
+│   ├── styling/                # 样式系统
+│   │   ├── constants.py        # 字体/样式常量
+│   │   ├── theme_manager.py    # 主题管理器
+│   │   ├── themes.py           # 主题配色定义
+│   │   └── widgets.py          # 组件工厂
 │   ├── dialogs/                # 对话框模块
 │   └── widgets/                # 自定义组件
 ├── utils/
 │   ├── version.py              # 版本管理
-│   └── logger.py               # 日志工具
-├── tests/                      # 测试模块
-│   ├── conftest.py             # 测试配置
-│   ├── test_system_core.py     # 系统核心测试
-│   ├── test_business.py        # 业务逻辑测试
-│   ├── test_infrastructure.py  # 基础设施测试
-│   └── test_concurrency.py     # 并发框架测试
+│   └── logger.py               # 日志工具（Loguru 配置）
+├── tests/                      # 测试模块（254 个测试，覆盖率 71%+）
 ├── .github/
-│   ├── workflows/              # GitHub Actions
-│   └── ISSUE_TEMPLATE/         # Issue 模板
+│   └── workflows/              # GitHub Actions (CI + Release)
 ├── pyproject.toml              # 项目配置
 ├── README.md                   # 项目说明
-├── DEVELOPING.md               # 开发指南
-├── CONTRIBUTING.md             # 贡献指南
-├── CODE_WIKI.md                # 代码 Wiki
 └── LICENSE                     # 许可证
 ```
 

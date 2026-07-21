@@ -1,16 +1,17 @@
 """
-infrastructure.py 模块测试
+infra 包模块测试
 
-测试工具函数、日志系统、线程池管理等功能。
+测试工具函数、日志系统等功能。
+线程池管理测试已移至 test_gui.py（因依赖 PyQt5）。
 """
+
 import datetime
 from unittest.mock import MagicMock, patch
 
-from infrastructure import (
+from infra import (
     Logger,
     StreamRedirector,
     format_period,
-    get_thread_pool_manager,
     init_logger,
     is_date_in_period,
     parse_date_str,
@@ -131,13 +132,13 @@ class TestLogger:
 
     def test_logger_initialization(self):
         """测试日志初始化"""
-        with patch("infrastructure.setup_logger"):
+        with patch("infra.logging.setup_logger"):
             logger = init_logger(level=1)
             assert logger is not None
 
     def test_logger_levels(self):
         """测试日志级别"""
-        with patch("infrastructure.setup_logger") as mock_setup:
+        with patch("infra.logging.setup_logger") as mock_setup:
             mock_logger = MagicMock()
             mock_setup.return_value = mock_logger
 
@@ -156,7 +157,7 @@ class TestStreamRedirector:
 
     def test_write_with_content(self):
         """测试写入内容"""
-        with patch("infrastructure.logger", MagicMock()):
+        with patch("infra.logging.logger", MagicMock()):
             redirector = StreamRedirector("test", 1)
             redirector.write("test message")
 
@@ -185,33 +186,3 @@ class TestStreamRedirector:
         """测试可读判断"""
         redirector = StreamRedirector("test", 1)
         assert redirector.readable() is False
-
-
-class TestThreadPoolManager:
-    """线程池管理测试"""
-
-    def test_singleton(self):
-        """测试单例模式"""
-        manager1 = get_thread_pool_manager()
-        manager2 = get_thread_pool_manager()
-
-        assert manager1 is manager2
-
-    def test_thread_pool_initialized(self):
-        """测试线程池初始化"""
-        manager = get_thread_pool_manager()
-
-        assert manager.thread_pool is not None
-        assert manager.get_max_threads() > 0
-
-    def test_max_threads_reasonable(self):
-        """测试最大线程数合理"""
-        import os
-
-        manager = get_thread_pool_manager()
-        max_threads = manager.get_max_threads()
-        cpu_count = os.cpu_count() or 4
-
-        assert max_threads <= cpu_count * 4
-        assert max_threads <= 16
-        assert max_threads >= 1

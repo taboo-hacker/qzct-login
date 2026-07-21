@@ -71,12 +71,24 @@
 ```
 qzct-login/
 ├── main.py                          # 程序入口点
-├── business.py                      # 业务逻辑核心
-├── system_core.py                   # 系统核心（配置、加密、日期）
-├── infrastructure.py                # 基础设施（日志、线程池、工具）
+├── constants.py                     # 常量配置
+├── exceptions.py                    # 自定义异常
 ├── concurrency.py                   # 并发框架（TaskChain + TaskExecutor）
+├── core/                            # 核心业务逻辑
+│   ├── config.py                    # 配置管理
+│   ├── encryption.py                # 安全加密
+│   ├── date_rules.py                # 日期判断
+│   └── lunar.py                     # 农历工具
+├── infra/                           # 基础设施
+│   ├── logging.py                   # 日志系统
+│   ├── thread_pool.py               # 线程池管理
+│   └── date_utils.py                # 日期工具函数
+├── services/                        # 业务服务
+│   ├── campus_login.py              # 校园网登录
+│   ├── wifi.py                      # WiFi 连接
+│   ├── shutdown.py                  # 定时关机
+│   └── tasks.py                     # 任务链定义
 ├── pyproject.toml                   # 项目配置
-├── requirements.txt                 # 依赖声明
 │
 ├── gui/                             # GUI 模块
 │   ├── main_window.py               # 主窗口（无边框、三区布局）
@@ -109,12 +121,17 @@ main.py
 │   ├── gui/style_helpers.py
 │   ├── gui/dialogs/*
 │   └── gui/widgets/*
-├── business.py
-│   ├── system_core.py
-│   ├── infrastructure.py
+├── services/tasks.py
+│   ├── services/campus_login.py
+│   ├── services/wifi.py
+│   ├── services/shutdown.py
+│   ├── core/config.py
+│   ├── core/date_rules.py
+│   ├── infra/logging.py
 │   └── concurrency.py
-├── system_core.py
-├── infrastructure.py
+├── core/config.py
+│   └── core/encryption.py
+├── infra/logging.py
 │   └── utils/logger.py
 ├── concurrency.py
 └── utils/version.py
@@ -168,10 +185,10 @@ main.py
 | 层级 | 职责 | 文件 |
 | --- | --- | --- |
 | GUI 层 | 用户界面，交互逻辑 | `gui/` |
-| 业务逻辑层 | WiFi、登录、关机等核心功能 | `business.py` |
+| 业务服务层 | WiFi、登录、关机等核心功能 | `services/` |
 | 并发调度层 | 任务链、并行执行、异步处理 | `concurrency.py` |
-| 系统核心层 | 配置管理、安全加密、日期处理 | `system_core.py` |
-| 基础设施层 | 日志、线程池、工具函数 | `infrastructure.py`, `utils/` |
+| 核心逻辑层 | 配置管理、安全加密、日期处理 | `core/` |
+| 基础设施层 | 日志、线程池、工具函数 | `infra/`, `utils/` |
 
 ---
 
@@ -198,7 +215,7 @@ main.py
 
 ---
 
-### 2. system_core.py - 系统核心模块
+### 2. core/ - 核心逻辑模块
 
 #### 2.1 农历工具模块
 
@@ -300,7 +317,7 @@ main.py
 
 ---
 
-### 3. business.py - 业务逻辑模块
+### 3. services/ - 业务服务模块
 
 #### 3.1 自动关机模块
 
@@ -357,7 +374,7 @@ main.py
 
 ---
 
-### 4. infrastructure.py - 基础设施模块
+### 4. infra/ - 基础设施模块
 
 #### 4.1 工具函数模块
 
@@ -457,7 +474,7 @@ chain.execute(executor)
 
 #### 5.3 内置任务
 
-在 `business.py` 中定义的任务：
+在 `services/tasks.py` 中定义的任务：
 | 任务 | 说明 |
 | --- | --- |
 | `task_check_condition()` | 检查执行条件 |
@@ -668,10 +685,10 @@ chain.execute(executor)
 - 避免在日志中输出密码
 
 ```python
-from infrastructure import info, error
+from infra.logging import info, error
 
-info("business", "WiFi 连接成功")
-error("business", "登录失败", exc_info=True)
+info("services", "WiFi 连接成功")
+error("services", "登录失败", exc_info=True)
 ```
 
 ### 并发规范
@@ -683,7 +700,7 @@ error("business", "登录失败", exc_info=True)
 ### 配置修改规范
 
 ```python
-from system_core import global_config, save_config
+from core.config import global_config, save_config
 
 # 修改配置
 global_config["WIFI_NAME"] = "MyWiFi"
@@ -712,12 +729,38 @@ save_config()
 | 依赖 | 用途 |
 | --- | --- |
 | black | 代码格式化 |
+| isort | 导入排序 |
 | flake8 | 代码检查 |
+| ruff | 快速代码检查 |
+| mypy | 静态类型检查 |
 | pytest | 单元测试 |
+| pytest-cov | 测试覆盖率 |
+| pytest-qt | GUI 测试支持 |
+| types-requests | requests 类型存根 |
 
 ---
 
 ## 更新日志
+
+### v1.3.0 (2026-05-24)
+
+- ✨ 新增系统托盘 — 关闭最小化、双击恢复、任务完成气泡通知
+- ✨ 新增暗色主题切换持久化
+- ✨ 新增键盘快捷键 — Ctrl+R 执行、Ctrl+, 设置、Ctrl+K 日历、F1 关于
+- ✨ 集成 chinese-calendar 作为法定假日兜底
+- 🔧 并发框架重构 — 改用 Qt 原生跨线程信号
+- 🔧 拆出 ConfigManager — 线程安全 + 浅拷贝 snapshot
+- 🔧 system_core 模块解耦 Qt 依赖
+- 🔧 业务函数抛结构化异常
+
+### v1.2.0 (2026-05-05)
+
+- ✨ 新增测试框架和单元测试
+- ✨ 新增 CI/CD 配置（GitHub Actions）
+- ✨ 新增常量配置模块（constants.py）
+- ✨ 新增自定义异常模块（exceptions.py）
+- 🔧 完善类型提示
+- 📝 新增开发指南和贡献指南
 
 ### v1.1.0 (2026-04-28)
 
@@ -745,5 +788,5 @@ save_config()
 
 ---
 
-**文档版本**：1.0.0  
-**最后更新**：2026-05-05
+**文档版本**：1.3.0  
+**最后更新**：2026-07-16

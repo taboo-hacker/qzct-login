@@ -1,492 +1,266 @@
 """
 主窗口模块
-现代卡片式设计 - 浅灰背景 + 纯白卡片 + 圆角胶囊按钮
+基于 Qt Fusion 原生风格
 """
 
+import contextlib
 import datetime
 import sys
-from typing import Optional
+import time
+from typing import Any
 
-from PyQt5.QtCore import QPoint, Qt, QTimer
-from PyQt5.QtGui import QColor, QCursor, QIcon, QMouseEvent
+from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QCloseEvent
 from PyQt5.QtWidgets import (
-    QApplication,
-    QFrame,
-    QGraphicsDropShadowEffect,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QMenu,
     QMessageBox,
-    QPushButton,
-    QStyle,
-    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
 
-from business import (
-    campus_login,
-    cancel_shutdown,
-    connect_wifi,
-    is_wifi_connected,
+from core.config import global_config, load_config
+from core.constants import LOG_FILE
+from core.date_rules import should_work_today
+from gui.dialogs import AboutDialog, CalendarDialog, SettingsDialog
+from gui.styling.constants import FontSize, FontStyle
+from gui.styling.widgets import LogTextEdit, create_button
+from gui.tray_manager import TrayManager
+from infra import (
+    StreamRedirector,
+    error,
+    info,
+    init_logger,
+    parse_date_str,
+)
+from infra.concurrency import TaskChain, TaskContext, TaskExecutor
+from services.campus_login import campus_login
+from services.shutdown import cancel_shutdown
+from services.tasks import (
     task_campus_login,
     task_check_condition,
     task_connect_wifi,
     task_set_shutdown,
 )
-from concurrency import TaskChain, TaskExecutor
-from gui.dialogs import AboutDialog, CalendarDialog, SettingsDialog
-from gui.style_helpers import (
-    LogTextEdit,
-    create_button,
-    create_label,
-)
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle
-from infrastructure import (
-    StreamRedirector,
-    error,
-    get_thread_pool_manager,
-    info,
-    init_logger,
-    parse_date_str,
-)
-from system_core import global_config, load_config, should_work_today
+from services.wifi import connect_wifi, is_wifi_connected
 from utils.version import get_project_version
 
 
-class TitleMenuBar(QFrame):
-    """可拖拽的标题菜单栏"""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setObjectName("titleMenuBar")
-        self.setFixedHeight(42)
-        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 8, 0)
-        layout.setSpacing(8)
-
-        title_label = QLabel("校园网自动登录 + 定时关机")
-        title_label.setObjectName("titleLabel")
-        title_label.setFont(FontStyle.bold(14))
-        layout.addWidget(title_label)
-
-        layout.addStretch()
-
-        self._settings_menu = QMenu("设置", self)
-        settings_action = self._settings_menu.addAction("配置设置")
-        settings_action.setShortcut("Ctrl+,")
-        settings_action.triggered.connect(self._parent_on_settings)
-        self._settings_menu.addSeparator()
-        calendar_action = self._settings_menu.addAction("任务日历")
-        calendar_action.setShortcut("Ctrl+K")
-        calendar_action.triggered.connect(self._parent_show_calendar)
-        self._settings_btn = QPushButton("设置 \u25be")
-        self._settings_btn.setObjectName("menuBtn")
-        self._settings_btn.setFixedHeight(34)
-        self._settings_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self._settings_btn.clicked.connect(self._show_settings_menu)
-        layout.addWidget(self._settings_btn)
-
-        self._help_menu = QMenu("帮助", self)
-        about_action = self._help_menu.addAction("关于我们")
-        about_action.setShortcut("F1")
-        about_action.triggered.connect(self._parent_show_about)
-        self._help_btn = QPushButton("帮助 \u25be")
-        self._help_btn.setObjectName("menuBtn")
-        self._help_btn.setFixedHeight(34)
-        self._help_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self._help_btn.clicked.connect(self._show_help_menu)
-        layout.addWidget(self._help_btn)
-
-        layout.addStretch()
-
-    def _show_settings_menu(self) -> None:
-        pos = self._settings_btn.mapToGlobal(QPoint(0, self._settings_btn.height()))
-        self._settings_menu.exec(pos)
-
-    def _show_help_menu(self) -> None:
-        pos = self._help_btn.mapToGlobal(QPoint(0, self._help_btn.height()))
-        self._help_menu.exec(pos)
-
-    def _parent_on_settings(self) -> None:
-        w = self.window()
-        if hasattr(w, "on_settings"):
-            w.on_settings()
-
-    def _parent_show_calendar(self) -> None:
-        w = self.window()
-        if hasattr(w, "show_calendar"):
-            w.show_calendar()
-
-    def _parent_show_about(self) -> None:
-        w = self.window()
-        if hasattr(w, "show_about"):
-            w.show_about()
-
-
 class MainWindow(QMainWindow):
-    """主窗口类 - 校园网自动登录 + 定时关机工具"""
+    """主窗口"""
 
     def __init__(self) -> None:
         super().__init__()
 
-        self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-
         self.setWindowTitle("校园网自动登录 + 定时关机")
-        self._drag_pos: Optional[QPoint] = None
-        self._corner_radius = 12
-        self._shadow_margin = 10  # 给 QGraphicsDropShadowEffect 留 blur 空间
-        self._force_quit = False  # 系统托盘：区分隐藏到托盘 vs 真实退出
+        self.setMinimumSize(600, 460)
+        self.resize(680, 500)
+        self._force_quit = False
+        self._task_chain_started: bool = False
 
-        # 自适应窗口：最小 750×540（比固定 860×620 宽松），默认尺寸仍舒适
-        default_w = 860 + 2 * self._shadow_margin
-        default_h = 620 + 2 * self._shadow_margin
-        min_w = 750 + 2 * self._shadow_margin
-        min_h = 540 + 2 * self._shadow_margin
-        self.setMinimumSize(min_w, min_h)
-        self.resize(default_w, default_h)
+        # 基础 UI（日志组件在初始化阶段就创建好，供日志系统使用）
+        self.log_text = LogTextEdit()
+        self._init_ui()
 
-        # 基础 UI（用于日志系统）
-        self._init_basic_ui()
-
-        # 初始化日志
-        init_logger(gui_log_widget=self.log_text, level=1)
+        # 初始化日志（日志文件落盘到 ~/.qzct/qzct.log，5MB 轮转×5）
+        init_logger(gui_log_widget=self.log_text, log_file_path=LOG_FILE, level=1)
 
         # 加载配置
         load_config()
 
         # 重定向输出
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
         sys.stdout = StreamRedirector("stdout", 1)
         sys.stderr = StreamRedirector("stderr", 3)
 
-        # 系统托盘（在所有 UI 元素之后创建，在 title_menu_bar 之前）
-        self._setup_tray()
-
-        # 标题菜单栏（顶部固定）
-        self.title_menu_bar = TitleMenuBar(self)
-        self.main_layout.addWidget(self.title_menu_bar)
-
-        # 分割线
-        sep1 = QFrame()
-        sep1.setObjectName("sectionSeparator")
-        sep1.setFixedHeight(1)
-        self.main_layout.addWidget(sep1)
-
-        # 中间内容区（可拖动）
-        self._create_content_area()
-
-        # 分割线
-        sep2 = QFrame()
-        sep2.setObjectName("sectionSeparator")
-        sep2.setFixedHeight(1)
-        self.main_layout.addWidget(sep2)
-
-        # 底部状态栏 + 运行日志（紧贴）
-        self._create_bottom_section()
+        # 系统托盘
+        self._tray = TrayManager(self)
 
         # 任务管理器
-        self.task_manager: Optional[TaskChain] = None
-        self.task_executor: Optional[TaskExecutor] = None
-
-        # 应用全局样式
-        self._apply_global_style()
+        self.task_manager: TaskChain | None = None
+        self.task_executor: TaskExecutor | None = None
+        # 测试用临时 executor 持久化引用，防止 GC 回收
+        self._test_executors: list[TaskExecutor] = []
 
         # 启动后自动执行
         QTimer.singleShot(200, self.run_on_start)
 
-        # 更新时间
+        # 时钟
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_time_display)
         self._timer.start(1000)
 
         info("main", "主窗口初始化完成")
 
-    def _init_basic_ui(self) -> None:
-        """初始化基础 UI 组件（用于日志系统）"""
+    def _init_ui(self) -> None:
+        """构建界面"""
         central = QWidget()
-        central.setObjectName("centralWidget")
-        central.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setCentralWidget(central)
 
-        # 给 outer 留 _shadow_margin 的环形空间渲染阴影
-        root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(
-            self._shadow_margin,
-            self._shadow_margin,
-            self._shadow_margin,
-            self._shadow_margin,
-        )
-        root_layout.setSpacing(0)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(6)
 
-        # 最外层容器（QSS 已带 border-radius:12px + 主题背景色）
-        outer = QFrame()
-        outer.setObjectName("outerContainer")
-        self.main_layout = QVBoxLayout(outer)
-        self.main_layout.setContentsMargins(8, 8, 8, 8)
-        self.main_layout.setSpacing(0)
+        # --- 菜单栏 ---
+        self._setup_menubar()
 
-        # GPU 加速的阴影，替代旧 paintEvent 中手绘的 5 层同心圆角矩形
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(20)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 50))
-        outer.setGraphicsEffect(shadow)
+        # --- 状态区 ---
+        layout.addWidget(self._create_status_group())
 
-        root_layout.addWidget(outer)
+        # --- 日志区 ---
+        layout.addWidget(self._create_log_group(), 1)
 
-        # 日志文本（提前创建，用于日志系统初始化）
-        self.log_text = LogTextEdit()
-
-    def _create_content_area(self) -> None:
-        """创建中间内容区域（可拖动）"""
-        content = QWidget()
-        content.setObjectName("contentArea")
-
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # 统一外框容器
-        outer = QFrame()
-        outer.setObjectName("contentOuterFrame")
-
-        outer_layout = QVBoxLayout(outer)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.setSpacing(0)
-
-        self._create_status_section(outer_layout)
-
-        content_layout.addWidget(outer)
-
-        self.main_layout.addWidget(content, 0)
+        # --- 底部按钮栏 ---
+        layout.addWidget(self._create_button_bar())
 
         self._update_status_display()
 
-    def _create_status_section(self, parent_layout: QVBoxLayout) -> None:
-        """创建状态信息卡片"""
-        status_card = QWidget()
-        status_card.setObjectName("contentStatusSection")
-        status_card.setMinimumHeight(110)
+    def _setup_menubar(self) -> None:
+        """标准菜单栏"""
+        menubar = self.menuBar()
+        assert menubar is not None
 
-        status_layout = QVBoxLayout(status_card)
-        status_layout.setSpacing(8)
-        status_layout.setContentsMargins(24, 24, 24, 24)
+        menu_setting = menubar.addMenu("设置")
+        assert menu_setting is not None
+        act_config = menu_setting.addAction("配置设置")
+        assert act_config is not None
+        act_config.setShortcut("Ctrl+,")
+        act_config.triggered.connect(self.on_settings)
+        menu_setting.addSeparator()
+        act_cal = menu_setting.addAction("任务日历")
+        assert act_cal is not None
+        act_cal.setShortcut("Ctrl+K")
+        act_cal.triggered.connect(self.show_calendar)
 
-        # 状态标题
-        theme = ThemeManager.current_theme()
-        status_title = create_label(
-            "当前状态",
-            font_size=16,
-            bold=True,
-            color=theme.text_primary,
+        menu_help = menubar.addMenu("帮助")
+        assert menu_help is not None
+        act_about = menu_help.addAction("关于")
+        assert act_about is not None
+        act_about.setShortcut("F1")
+        act_about.triggered.connect(self.show_about)
+
+    def _create_status_group(self) -> QGroupBox:
+        """状态信息"""
+        group = QGroupBox("当前状态")
+        v = QVBoxLayout(group)
+        v.setSpacing(4)
+
+        row = QHBoxLayout()
+        row.setSpacing(24)
+
+        left = QVBoxLayout()
+        left.setSpacing(2)
+        self.date_label = QLabel()
+        left.addWidget(self.date_label)
+        self.status_label = QLabel()
+        left.addWidget(self.status_label)
+        row.addLayout(left)
+
+        right = QVBoxLayout()
+        right.setSpacing(2)
+        self.rule_label = QLabel()
+        right.addWidget(self.rule_label)
+        self.time_label = QLabel()
+        right.addWidget(self.time_label)
+        row.addLayout(right)
+
+        row.addStretch()
+        v.addLayout(row)
+        return group
+
+    def _create_log_group(self) -> QGroupBox:
+        """日志区"""
+        group = QGroupBox("运行日志")
+        v = QVBoxLayout(group)
+        v.setSpacing(4)
+
+        self.log_text.setMinimumHeight(140)
+        v.addWidget(self.log_text, 1)
+        return group
+
+    def _create_button_bar(self) -> QWidget:
+        """底部按钮行"""
+        bar = QWidget()
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(0, 4, 0, 0)
+        h.setSpacing(8)
+
+        self.run_btn = create_button("执行", btn_type="primary", min_width=90, font_size=12)
+        self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机 (Ctrl+R)")
+        self.run_btn.setShortcut("Ctrl+R")
+        self.run_btn.clicked.connect(self.on_run_once)
+        h.addWidget(self.run_btn)
+
+        self.cancel_btn = create_button(
+            "取消关机", btn_type="outline_danger", min_width=90, font_size=12
         )
-        status_layout.addWidget(status_title)
+        self.cancel_btn.setToolTip("取消已设置的关机任务")
+        self.cancel_btn.clicked.connect(self.on_cancel_shutdown)
+        h.addWidget(self.cancel_btn)
 
-        # 信息网格
-        info_grid = QHBoxLayout()
-        info_grid.setSpacing(16)
+        h.addSpacing(8)
 
-        # 左侧 50%
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(6)
+        self.test_wifi_btn = create_button("WiFi", btn_type="text", min_width=70, font_size=12)
+        self.test_wifi_btn.setToolTip("仅测试 WiFi 连接")
+        self.test_wifi_btn.clicked.connect(self.on_test_wifi)
+        h.addWidget(self.test_wifi_btn)
 
-        self.date_label = create_label("", font_size=14)
-        left_layout.addWidget(self.date_label)
+        self.test_login_btn = create_button("登录", btn_type="text", min_width=70, font_size=12)
+        self.test_login_btn.setToolTip("仅测试校园网登录")
+        self.test_login_btn.clicked.connect(self.on_test_login)
+        h.addWidget(self.test_login_btn)
 
-        self.status_label = create_label("", font_size=14)
-        left_layout.addWidget(self.status_label)
+        self.exit_btn = create_button("退出", btn_type="text", min_width=60, font_size=12)
+        self.exit_btn.clicked.connect(lambda: self._real_close())
+        h.addWidget(self.exit_btn)
 
-        info_grid.addLayout(left_layout, 1)
-        info_grid.addSpacing(24)
+        h.addStretch()
 
-        # 右侧 50%
-        right_layout = QVBoxLayout()
-        right_layout.setSpacing(6)
+        self.footer_status = QLabel("就绪")
+        self.footer_status.setFont(FontStyle.normal(FontSize.CONTENT_SMALL))
+        h.addWidget(self.footer_status)
 
-        self.rule_label = create_label("", font_size=14, color=theme.text_secondary)
-        right_layout.addWidget(self.rule_label)
+        version_label = QLabel(f"v{get_project_version()}")
+        version_label.setFont(FontStyle.normal(9))
+        h.addWidget(version_label)
 
-        self.time_label = create_label("", font_size=14, color=theme.text_secondary)
-        right_layout.addWidget(self.time_label)
-
-        info_grid.addLayout(right_layout, 1)
-
-        status_layout.addLayout(info_grid)
-        parent_layout.addWidget(status_card)
+        return bar
 
     def _update_time_display(self) -> None:
-        """更新时间显示"""
+        # 有活跃任务时不覆盖状态栏，避免覆盖任务进度信息
+        if self.task_executor and self.task_executor.active_count > 0:
+            return
         now = datetime.datetime.now()
         time_str = now.strftime("%H:%M:%S")
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"就绪  |  {time_str}")
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        """鼠标按下事件（用于窗口拖拽）"""
-        if event.button() == Qt.LeftButton:
-            widget = self.childAt(event.pos())
-            if widget and (
-                widget.objectName() in ("titleMenuBar", "contentArea")
-                or (
-                    widget.parent()
-                    and widget.parent().objectName() in ("titleMenuBar", "contentArea")
-                )
-            ):
-                self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
-                event.accept()
-                return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        """鼠标移动事件（用于窗口拖拽）"""
-        if event.buttons() == Qt.LeftButton and self._drag_pos is not None:
-            self.move(event.globalPos() - self._drag_pos)
-            event.accept()
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        """鼠标释放事件"""
-        self._drag_pos = None
-        super().mouseReleaseEvent(event)
-
-    def _create_bottom_section(self) -> None:
-        """创建底部运行日志区域"""
-        bottom = QFrame()
-        bottom.setObjectName("bottomSection")
-
-        bottom_layout = QVBoxLayout(bottom)
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_layout.setSpacing(0)
-
-        # 统一外框容器（白底，12px 圆角）
-        outer = QFrame()
-        outer.setObjectName("logOuterFrame")
-
-        outer_layout = QVBoxLayout(outer)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.setSpacing(0)
-
-        # 运行日志
-        log_card = QFrame()
-        log_card.setObjectName("logCard")
-        log_layout = QVBoxLayout(log_card)
-        log_layout.setContentsMargins(0, 0, 0, 0)
-        log_layout.setSpacing(0)
-
-        log_header = QHBoxLayout()
-        log_header.setContentsMargins(18, 10, 18, 6)
-
-        log_title = create_label(
-            "运行日志",
-            font_size=FontSize.SECTION_TITLE,
-            bold=True,
-            color=ThemeManager.current_theme().primary,
-        )
-        log_header.addWidget(log_title)
-        log_header.addStretch()
-        log_layout.addLayout(log_header)
-
-        self.log_text.setMinimumHeight(160)
-        log_layout.addWidget(self.log_text)
-
-        outer_layout.addWidget(log_card)
-
-        # 分割线
-        separator = QFrame()
-        separator.setObjectName("logSeparator")
-        separator.setFixedHeight(1)
-        outer_layout.addWidget(separator)
-
-        # 按钮 + 状态合并行
-        combined_bar = QFrame()
-        combined_bar.setObjectName("bottomStatusBar")
-        combined_layout = QHBoxLayout(combined_bar)
-        combined_layout.setContentsMargins(18, 6, 18, 4)
-        combined_layout.setSpacing(8)
-
-        # 左侧按钮
-        self.run_btn = create_button("执行", btn_type="primary", min_width=110, font_size=13)
-        self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机 (Ctrl+R)")
-        self.run_btn.setShortcut("Ctrl+R")
-        self.run_btn.clicked.connect(self.on_run_once)
-        combined_layout.addWidget(self.run_btn)
-
-        self.cancel_btn = create_button(
-            "取消关机", btn_type="outline_danger", min_width=100, font_size=12
-        )
-        self.cancel_btn.setToolTip("取消已设置的关机任务")
-        self.cancel_btn.clicked.connect(self.on_cancel_shutdown)
-        combined_layout.addWidget(self.cancel_btn)
-
-        combined_layout.addSpacing(8)
-
-        self.test_wifi_btn = create_button("WiFi", btn_type="text", min_width=80, font_size=12)
-        self.test_wifi_btn.setToolTip("仅测试 WiFi 连接")
-        self.test_wifi_btn.clicked.connect(self.on_test_wifi)
-        combined_layout.addWidget(self.test_wifi_btn)
-
-        self.test_login_btn = create_button("登录", btn_type="text", min_width=80, font_size=12)
-        self.test_login_btn.setToolTip("仅测试校园网登录")
-        self.test_login_btn.clicked.connect(self.on_test_login)
-        combined_layout.addWidget(self.test_login_btn)
-
-        self.exit_btn = create_button("退出", btn_type="text", min_width=70, font_size=12)
-        self.exit_btn.clicked.connect(self.close)
-        combined_layout.addWidget(self.exit_btn)
-
-        combined_layout.addStretch()
-
-        # 右侧状态
-        self.footer_status = QLabel("就绪")
-        self.footer_status.setObjectName("footerStatus")
-        self.footer_status.setFont(FontStyle.normal(12))
-        combined_layout.addWidget(self.footer_status)
-
-        version_label = create_label(
-            f"v{get_project_version()}",
-            font_size=9,
-            color=ThemeManager.current_theme().text_tertiary,
-        )
-        combined_layout.addWidget(version_label)
-
-        outer_layout.addWidget(combined_bar)
-
-        bottom_layout.addWidget(outer)
-        self.main_layout.addWidget(bottom, 1)
-
-    def _apply_global_style(self) -> None:
-        """应用全局主题样式"""
-        qss = StyleManager.get_global_stylesheet()
-        self.setStyleSheet(qss)
-
     def _set_buttons_enabled(self, enabled: bool) -> None:
-        """设置按钮可用状态，并切换执行按钮的 loading 文案"""
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
-        # loading 态：禁用时显示运行中提示，启用时恢复"执行"
-        self.run_btn.setText("执行" if enabled else "⟳ 运行中...")
+        self.run_btn.setText("执行" if enabled else "运行中...")
+
+    # ------------------------------------------------------------------
+    # 任务链
+    # ------------------------------------------------------------------
 
     def run_on_start(self) -> None:
-        """启动时自动执行一次"""
-        if hasattr(self, "_task_chain_started") and self._task_chain_started:
+        if self._task_chain_started:
             return
         self._task_chain_started = True
-
         info("main", "程序启动，开始自动执行任务链")
         QTimer.singleShot(1000, self.start_task_chain)
 
     def start_task_chain(self) -> None:
-        """启动任务链"""
         self._set_buttons_enabled(False)
-
+        # 清理旧的 executor，避免线程池泄漏
+        if self.task_executor is not None:
+            self.task_executor.cancel_all()
+            self.task_executor.shutdown(wait=False)
         self.task_executor = TaskExecutor()
 
         self.task_executor.started.connect(self._on_task_started)
@@ -502,54 +276,49 @@ class MainWindow(QMainWindow):
         chain.add(task_set_shutdown)
         chain.on_success(self._on_chain_success)
         chain.on_error(self._on_chain_error)
-
         chain.execute(self.task_executor)
 
     def _on_task_started(self, task_name: str) -> None:
-        """任务开始回调"""
         info("main", f"任务开始: {task_name}")
 
-    def _on_task_finished(self, task_name: str, result: dict) -> None:
-        """任务完成回调"""
+    def _on_task_finished(self, task_name: str, result: dict[str, Any]) -> None:
         info("main", f"任务完成: {task_name}")
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"{task_name} 完成")
 
     def _on_task_error(self, task_name: str, error_msg: str) -> None:
-        """任务出错回调"""
         error("main", f"任务出错: {task_name} - {error_msg}")
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"{task_name} 出错")
 
     def _on_task_progress(self, task_name: str, percent: int) -> None:
-        """任务进度回调"""
         info("main", f"任务进度: {task_name} - {percent}%")
 
-    def _on_chain_success(self, success: bool, results: list) -> None:
-        """任务链成功回调"""
+    def _on_chain_success(self, success: bool, results: dict[str, Any]) -> None:
         self._set_buttons_enabled(True)
         if success:
             self.footer_status.setText("所有任务执行完成")
             info("main", "任务链执行成功")
-            self._tray_notify("校园网自动登录", "所有任务执行完成")
+            self._tray.notify("校园网自动登录", "所有任务执行完成")
         else:
-            self.footer_status.setText("任务链执行完成，部分任务失败")
+            self.footer_status.setText("部分任务失败")
             info("main", "任务链执行完成，但有任务失败")
-            self._tray_notify("校园网自动登录", "部分任务执行失败，请查看日志")
+            self._tray.notify("校园网自动登录", "部分任务执行失败，请查看日志")
 
-    def _on_chain_error(self, results: list) -> None:
-        """任务链出错回调"""
+    def _on_chain_error(self, results: dict[str, Any]) -> None:
         self._set_buttons_enabled(True)
         self.footer_status.setText("任务链执行失败")
         error("main", f"任务链执行失败: {results}")
 
     def _on_all_tasks_finished(self, success: bool) -> None:
-        """所有任务完成回调"""
         self._set_buttons_enabled(True)
         info("main", f"所有任务执行完成，成功: {success}")
 
+    # ------------------------------------------------------------------
+    # 按钮事件
+    # ------------------------------------------------------------------
+
     def on_run_once(self) -> None:
-        """手动执行一次完整任务"""
         if (
             QMessageBox.question(self, "确认", "是否立即执行一次完整任务（WiFi+登录+关机）？")
             == QMessageBox.StandardButton.Yes
@@ -558,7 +327,6 @@ class MainWindow(QMainWindow):
             self.start_task_chain()
 
     def on_cancel_shutdown(self) -> None:
-        """取消关机任务"""
         if (
             QMessageBox.question(self, "确认", "是否取消已设置的关机任务？")
             == QMessageBox.StandardButton.Yes
@@ -569,7 +337,6 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "完成", "已尝试取消关机任务")
 
     def on_test_wifi(self) -> None:
-        """测试 WiFi 连接"""
         wifi_name = global_config.get("WIFI_NAME", "")
         if not wifi_name:
             QMessageBox.warning(self, "提示", "请先在设置中配置 WiFi 名称")
@@ -583,28 +350,35 @@ class MainWindow(QMainWindow):
 
         self.footer_status.setText("正在测试 WiFi...")
         info("main", f"开始测试 WiFi 连接：{wifi_name}")
+        self._test_wifi_name = wifi_name
 
-        if is_wifi_connected(wifi_name):
+        def _do_wifi_test(ctx: TaskContext) -> str:
+            if is_wifi_connected(wifi_name):
+                return "already_connected"
+            wifi_password = global_config.get("WIFI_PASSWORD", "")
+            if connect_wifi(wifi_name, wifi_password):
+                time.sleep(3)
+                if is_wifi_connected(wifi_name):
+                    return "connected"
+                return "failed_after_connect"
+            return "connect_command_failed"
+
+        executor = TaskExecutor(max_workers=1)
+        self._test_executors.append(executor)
+        executor.finished.connect(self._on_wifi_test_finished)
+        executor.error.connect(self._on_wifi_test_error)
+        # 任务完成后从列表中移除
+        executor.finished.connect(lambda *_: self._release_test_executor(executor))
+        executor.error.connect(lambda *_: self._release_test_executor(executor))
+        executor.submit(_do_wifi_test, "test_wifi")
+
+    def _on_wifi_test_finished(self, task_name: str, result: object) -> None:
+        wifi_name = getattr(self, "_test_wifi_name", "")
+        if result == "already_connected":
             info("main", f"已成功连接到 WiFi：{wifi_name}")
             self.footer_status.setText("WiFi 已连接")
             QMessageBox.information(self, "测试结果", f"已成功连接到 WiFi：{wifi_name}")
-        else:
-            info("main", "WiFi 未连接，尝试建立连接...")
-            if connect_wifi(wifi_name, global_config.get("WIFI_PASSWORD", "")):
-                self.footer_status.setText("正在建立 WiFi 连接...")
-                QTimer.singleShot(3000, lambda: self._check_wifi_result(wifi_name))
-            else:
-                error("main", "WiFi 连接命令执行失败", exc_info=False)
-                self.footer_status.setText("WiFi 连接失败")
-                QMessageBox.critical(
-                    self,
-                    "错误",
-                    "WiFi 连接命令执行失败，请检查 WiFi 名称和密码是否正确",
-                )
-
-    def _check_wifi_result(self, wifi_name: str) -> None:
-        """检查 WiFi 连接结果"""
-        if is_wifi_connected(wifi_name):
+        elif result == "connected":
             info("main", f"WiFi 连接成功：{wifi_name}")
             self.footer_status.setText("WiFi 连接成功")
             QMessageBox.information(self, "测试结果", f"WiFi 连接成功：{wifi_name}")
@@ -621,8 +395,12 @@ class MainWindow(QMainWindow):
                 "- 网络设备故障",
             )
 
+    def _on_wifi_test_error(self, task_name: str, error_msg: str) -> None:
+        self.footer_status.setText("WiFi 测试出错")
+        error("main", f"WiFi 测试异常：{error_msg}")
+        QMessageBox.critical(self, "错误", f"WiFi 测试出错：{error_msg}")
+
     def on_test_login(self) -> None:
-        """测试校园网登录"""
         username = global_config.get("USERNAME", "")
         if not username:
             QMessageBox.warning(self, "提示", "请先在设置中配置校园网账号")
@@ -637,20 +415,36 @@ class MainWindow(QMainWindow):
         self.footer_status.setText("正在测试登录...")
         info("main", "测试校园网登录")
 
-        try:
-            campus_login()
-            self.footer_status.setText("登录测试完成")
-            QMessageBox.information(
-                self,
-                "测试结果",
-                "校园网登录测试完成，请查看日志了解详细结果",
-            )
-        except Exception as e:
-            self.footer_status.setText("登录测试失败")
-            QMessageBox.critical(self, "错误", f"校园网登录测试失败：{str(e)}")
+        def _do_login_test(ctx: TaskContext) -> bool:
+            return campus_login()
+
+        executor = TaskExecutor(max_workers=1)
+        self._test_executors.append(executor)
+        executor.finished.connect(self._on_login_test_finished)
+        executor.error.connect(self._on_login_test_error)
+        executor.finished.connect(lambda *_: self._release_test_executor(executor))
+        executor.error.connect(lambda *_: self._release_test_executor(executor))
+        executor.submit(_do_login_test, "test_login")
+
+    def _release_test_executor(self, executor: TaskExecutor) -> None:
+        """从测试 executor 列表中移除已完成的 executor 并关闭它。"""
+        with contextlib.suppress(ValueError):
+            self._test_executors.remove(executor)
+        executor.shutdown(wait=False)
+
+    def _on_login_test_finished(self, task_name: str, result: object) -> None:
+        self.footer_status.setText("登录测试完成")
+        QMessageBox.information(
+            self,
+            "测试结果",
+            "校园网登录测试完成，请查看日志了解详细结果",
+        )
+
+    def _on_login_test_error(self, task_name: str, error_msg: str) -> None:
+        self.footer_status.setText("登录测试失败")
+        QMessageBox.critical(self, "错误", f"校园网登录测试失败：{error_msg}")
 
     def on_settings(self) -> None:
-        """打开设置窗口"""
         try:
             dialog = SettingsDialog(self)
             if dialog.exec():
@@ -663,7 +457,6 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", error_msg)
 
     def _update_status_display(self) -> None:
-        """更新状态显示"""
         today = datetime.date.today()
         need_work = should_work_today()
         date_rules = global_config.get("DATE_RULES", {})
@@ -680,82 +473,44 @@ class MainWindow(QMainWindow):
 
         work_status = "需要联网并关机" if need_work else "不执行任何操作"
 
-        self.date_label.setText(f"当前日期：{today}（{today.strftime('%A')}）")
-        self.status_label.setText(f"今天状态：{work_status}")
-        self.rule_label.setText(f"规则来源：{rule_source}")
+        self.date_label.setText(f"日期：{today}（{today.strftime('%A')}）")
+        self.status_label.setText(f"状态：{work_status}")
+        self.rule_label.setText(f"规则：{rule_source}")
         self.time_label.setText(
-            f"关机时间："
-            f"{global_config.get('SHUTDOWN_HOUR', 23):02d}:"
+            f"关机：{global_config.get('SHUTDOWN_HOUR', 23):02d}:"
             f"{global_config.get('SHUTDOWN_MIN', 0):02d}"
         )
 
     def show_about(self) -> None:
-        """显示关于对话框"""
-        dialog = AboutDialog(self)
-        dialog.exec()
+        AboutDialog(self).exec()
 
     def show_calendar(self) -> None:
-        """显示任务日历对话框"""
-        dialog = CalendarDialog(self)
-        dialog.exec()
+        CalendarDialog(self).exec()
 
-    def _setup_tray(self) -> None:
-        """创建系统托盘图标和菜单"""
-        if not QSystemTrayIcon.isSystemTrayAvailable():
-            info("main", "系统托盘不可用")
-            return
-
-        icon = QApplication.style().standardIcon(QStyle.SP_ComputerIcon)
-        self._tray_icon = QSystemTrayIcon(icon, self)
-        self._tray_icon.setToolTip("校园网自动登录")
-
-        tray_menu = QMenu()
-        show_action = tray_menu.addAction("显示主窗口")
-        show_action.triggered.connect(self._tray_show)
-        tray_menu.addSeparator()
-        quit_action = tray_menu.addAction("退出")
-        quit_action.triggered.connect(self._real_close)
-
-        self._tray_icon.setContextMenu(tray_menu)
-        self._tray_icon.activated.connect(self._on_tray_activated)
-        self._tray_icon.show()
-
-    def _tray_show(self) -> None:
-        """从托盘恢复显示窗口"""
-        self.showNormal()
-        self.activateWindow()
-        self.raise_()
-
-    def _tray_notify(self, title: str, message: str) -> None:
-        """发送系统托盘通知气泡"""
-        if hasattr(self, "_tray_icon") and self._tray_icon.isVisible():
-            self._tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 3000)
-
-    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        """托盘图标双击/单击事件"""
-        if reason == QSystemTrayIcon.DoubleClick:
-            self._tray_show()
+    # ------------------------------------------------------------------
+    # 窗口关闭
+    # ------------------------------------------------------------------
 
     def _real_close(self) -> None:
-        """真实退出程序（清理并关闭）"""
         self._force_quit = True
         self.close()
 
-    def closeEvent(self, event) -> None:
-        """关闭窗口事件 —— 最小化到系统托盘，而非退出"""
-        if not self._force_quit and hasattr(self, "_tray_icon") and self._tray_icon.isVisible():
+    def quit_application(self) -> None:
+        """公共退出方法，供 TrayManager 等外部组件调用。"""
+        self._real_close()
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:
+        assert event is not None
+        if not self._force_quit and self._tray.is_available():
             self.hide()
-            self._tray_notify("校园网自动登录", "程序已最小化到系统托盘，右键可退出")
+            self._tray.notify("校园网自动登录", "程序已最小化到系统托盘，右键可退出")
             event.ignore()
             return
 
+        # 先询问用户是否强制退出（在 shutdown 之前）
         if self.task_executor:
-            self.task_executor.cancel_all()
-            self.task_executor.shutdown(wait=False)
-
-        active_threads = get_thread_pool_manager().get_active_threads()
-        if active_threads > 0:
-            if (
+            active_threads = self.task_executor.active_count
+            if active_threads > 0 and (
                 QMessageBox.question(
                     self,
                     "确认",
@@ -766,5 +521,17 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        sys.stdout = sys.__stdout__
+        # 用户确认退出后，清理所有 executor
+        if self.task_executor:
+            self.task_executor.cancel_all()
+            self.task_executor.shutdown(wait=False)
+
+        # 清理测试用临时 executor
+        for ex in self._test_executors:
+            ex.cancel_all()
+            ex.shutdown(wait=False)
+        self._test_executors.clear()
+
+        sys.stdout = self._original_stdout
+        sys.stderr = self._original_stderr
         event.accept()

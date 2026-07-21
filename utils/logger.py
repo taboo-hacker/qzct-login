@@ -1,62 +1,24 @@
+"""
+Loguru 日志系统配置
+
+提供日志器初始化和配置。QtLogSink 已移至 gui/log_sink.py，
+本模块通过延迟导入使用，使 utils/ 层不再在模块加载时耦合 PyQt5。
+"""
+
 import os
 import sys
+from typing import Any
 
 from loguru import logger
-from PyQt5.QtCore import QObject, QTimer
-
-
-class QtLogSink(QObject):
-    """
-    Loguru 自定义 Sink，将日志安全转发到 PyQt GUI 组件
-    """
-
-    _instance = None
-    _pending_logs = []
-    _flush_timer = None
-
-    def __init__(self, gui_widget=None):
-        super().__init__()
-        self.gui_widget = gui_widget
-
-    @classmethod
-    def set_gui_widget(cls, widget):
-        if cls._instance is None:
-            cls._instance = cls(widget)
-        else:
-            cls._instance.gui_widget = widget
-
-    def write(self, message):
-        if self.gui_widget:
-            QTimer.singleShot(0, lambda: self._append_to_gui(message))
-        elif QtLogSink._flush_timer is not None:
-            QtLogSink._pending_logs.append(message)
-            if len(QtLogSink._pending_logs) >= 20:
-                QtLogSink._flush_pending_logs()
-
-    def _append_to_gui(self, message):
-        if self.gui_widget:
-            cursor = self.gui_widget.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            cursor.insertText(message)
-            self.gui_widget.setTextCursor(cursor)
-            self.gui_widget.ensureCursorVisible()
-
-    @classmethod
-    def _flush_pending_logs(cls):
-        if cls._instance and cls._pending_logs:
-            combined = "".join(cls._pending_logs)
-            cls._pending_logs.clear()
-            cls._instance._append_to_gui(combined)
-
-    @classmethod
-    def flush_pending_logs(cls):
-        if cls._pending_logs:
-            QTimer.singleShot(0, cls._flush_pending_logs)
 
 
 def setup_logger(
-    gui_widget=None, log_file=None, level="INFO", max_size="10 MB", retention="30 days"
-):
+    gui_widget: Any = None,
+    log_file: str | None = None,
+    level: str = "INFO",
+    max_size: str = "10 MB",
+    retention: str = "30 days",
+) -> Any:
     """
     配置 Loguru 日志系统
 
@@ -66,42 +28,75 @@ def setup_logger(
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         max_size: 日志文件最大大小，默认 10 MB
         retention: 日志保留时间，默认 30 天
+
+    Returns:
+        Loguru logger 实例
     """
     logger.remove()
 
-    log_format = "[{time:YYYY-MM-DD HH:mm:ss.SSS}] [{name}] [{level}] {message}"
+    # 纯文本格式（GUI + 文件）
+    plain_format = "[{time:YYYY-MM-DD HH:mm:ss.SSS}] [{name}] [{level}] {message}"
+
+    # 终端彩色格式
+    terminal_format = (
+        "<light-black>[{time:YYYY-MM-DD HH:mm:ss.SSS}]</light-black> "
+        "<cyan>[{name}]</cyan> "
+        "<level>[{level}]</level> "
+        "{message}"
+    )
 
     if gui_widget:
+        from gui.log_sink import QtLogSink
+
         QtLogSink.set_gui_widget(gui_widget)
-        logger.add(QtLogSink._instance.write, level=level, format=log_format + "\n", colorize=False)
+        logger.add(
+            QtLogSink._instance.write,  # type: ignore[union-attr]
+            level=level,
+            format=plain_format + "\n",
+            colorize=False,
+        )
 
     if log_file:
         log_dir = os.path.dirname(log_file)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
+
+        # 预创建空日志文件并限制权限（防止敏感信息泄露）
+        if not os.path.exists(log_file):
+            with open(log_file, "a", encoding="utf-8"):
+                pass
+        try:
+            from core.encryption import _restrict_file_permissions
+
+            _restrict_file_permissions(log_file)
+        except Exception:
+            pass  # 权限限制失败不阻断日志初始化
+
         logger.add(
             log_file,
             level=level,
-            format=log_format,
+            format=plain_format,
             rotation=max_size,
             compression="zip",
             retention=retention,
             encoding="utf-8",
         )
 
-    logger.add(sys.stderr, level=level, format=log_format, colorize=True)
+    logger.add(sys.stderr, level=level, format=terminal_format, colorize=True)
 
     logger.info("日志系统初始化完成 [Loguru]")
     return logger
 
 
-def set_gui_widget(widget):
+def set_gui_widget(widget: Any) -> None:
     """运行时更新 GUI 日志组件"""
+    from gui.log_sink import QtLogSink
+
     QtLogSink.set_gui_widget(widget)
     if QtLogSink._instance and QtLogSink._pending_logs:
         QtLogSink.flush_pending_logs()
 
 
-def get_logger():
+def get_logger() -> Any:
     """获取 Loguru logger 实例"""
     return logger

@@ -1,0 +1,106 @@
+"""
+GUI 日志 Sink
+
+将 Loguru 日志安全转发到 PyQt GUI 组件。
+从 utils/logger.py 中拆出，使 utils/ 层不再在模块加载时耦合 PyQt5。
+"""
+
+import contextlib
+import threading
+from typing import Any, Optional
+
+from PyQt5.QtCore import QObject, QTimer
+from PyQt5.QtWidgets import QWidget
+
+
+class QtLogSink(QObject):
+    """
+    Loguru 自定义 Sink，将日志安全转发到 PyQt GUI 组件
+
+    无 GUI widget 时（初始化前、widget 销毁后），日志缓冲到 _pending_logs，
+    在 set_gui_widget 时通过 flush_pending_logs 统一 flush。
+    """
+
+    _instance: Optional["QtLogSink"] = None
+    _pending_logs: list[str] = []
+    _lock = threading.Lock()
+
+    def __init__(self, gui_widget: QWidget | None = None) -> None:
+        super().__init__()
+        self._gui_widget: QWidget | None = None
+        self._destroyed_conn: Any = None
+        if gui_widget is not None:
+            self.set_widget(gui_widget)
+
+    @property
+    def gui_widget(self) -> QWidget | None:
+        return self._gui_widget
+
+    def set_widget(self, widget: QWidget) -> None:
+        """设置 GUI widget 并监听其 destroyed 信号以清空引用。"""
+        # 断开旧 widget 的 destroyed 信号
+        if self._gui_widget is not None:
+            with contextlib.suppress(TypeError):
+                self._gui_widget.destroyed.disconnect(self._on_widget_destroyed)
+        self._gui_widget = widget
+        # 监听 widget 销毁，防止访问已删除的 C++ 对象
+        self._destroyed_conn = widget.destroyed.connect(self._on_widget_destroyed)
+
+    def _on_widget_destroyed(self) -> None:
+        """widget 被 Qt C++ 侧销毁时清空引用。"""
+        self._gui_widget = None
+        self._destroyed_conn = None
+
+    @classmethod
+    def set_gui_widget(cls, widget: QWidget) -> None:
+        if cls._instance is None:
+            cls._instance = cls(widget)
+        else:
+            cls._instance.set_widget(widget)
+        # widget 就绪后 flush 缓冲的日志
+        cls.flush_pending_logs()
+
+    def write(self, message: str) -> None:
+        if self._gui_widget is not None:
+            # 捕获引用，避免 lambda 执行时 widget 已被销毁
+            widget = self._gui_widget
+            QTimer.singleShot(0, lambda: self._safe_append_to_gui(widget, message))
+        else:
+            # 无 GUI widget 时缓冲日志
+            with QtLogSink._lock:
+                QtLogSink._pending_logs.append(message)
+                if len(QtLogSink._pending_logs) >= 50:
+                    QtLogSink._pending_logs.clear()
+
+    def _safe_append_to_gui(self, widget: QWidget, message: str) -> None:
+        """安全地向 GUI 追加日志，widget 已销毁时静默丢弃。"""
+        try:
+            cursor = widget.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            cursor.insertText(message)
+            widget.setTextCursor(cursor)
+            widget.ensureCursorVisible()
+        except RuntimeError:
+            # widget 的 C++ 对象已被销毁
+            self._gui_widget = None
+
+    def _append_to_gui(self, message: str) -> None:
+        if self._gui_widget is not None:
+            self._safe_append_to_gui(self._gui_widget, message)
+
+    @classmethod
+    def _flush_pending_logs(cls) -> None:
+        with cls._lock:
+            if not cls._pending_logs:
+                return
+            combined = "".join(cls._pending_logs)
+            cls._pending_logs.clear()
+        if cls._instance is not None and cls._instance._gui_widget is not None:
+            instance = cls._instance
+            widget: QWidget = cls._instance._gui_widget
+            QTimer.singleShot(0, lambda: instance._safe_append_to_gui(widget, combined))
+
+    @classmethod
+    def flush_pending_logs(cls) -> None:
+        if cls._pending_logs:
+            cls._flush_pending_logs()

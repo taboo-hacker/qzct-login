@@ -3,7 +3,7 @@
 使用组件工厂重构的编辑对话框
 """
 
-from typing import Optional
+from typing import Any
 
 from PyQt5.QtCore import QDate, Qt
 from PyQt5.QtWidgets import (
@@ -17,10 +17,9 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from gui.style_helpers import create_button, create_card_widget, create_label
-from gui.style_manager import StyleManager
-from gui.styles import FontSize
-from infrastructure import parse_date_str
+from gui.styling.constants import FontSize
+from gui.styling.widgets import create_button, create_card_widget, create_label
+from infra.date_utils import parse_date_str
 
 
 class PeriodEditDialog(QDialog):
@@ -28,8 +27,8 @@ class PeriodEditDialog(QDialog):
 
     def __init__(
         self,
-        parent: Optional[QDialog] = None,
-        period: Optional[dict] = None,
+        parent: QDialog | None = None,
+        period: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(parent)
         is_edit = period is not None
@@ -37,12 +36,12 @@ class PeriodEditDialog(QDialog):
         self.setFixedSize(420, 280)
 
         self.period = period if period else {"name": "", "start": "", "end": ""}
-        self.result_period: Optional[dict] = None
+        self.result_period: dict[str, Any] | None = None
 
         # 控件引用
-        self.name_edit: Optional[QLineEdit] = None
-        self.start_edit: Optional[QDateEdit] = None
-        self.end_edit: Optional[QDateEdit] = None
+        self.name_edit: QLineEdit | None = None
+        self.start_edit: QDateEdit | None = None
+        self.end_edit: QDateEdit | None = None
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
@@ -119,14 +118,6 @@ class PeriodEditDialog(QDialog):
         main_layout.addLayout(btn_layout)
         main_layout.addSpacing(15)
 
-        self._apply_styles()
-
-    def _apply_styles(self) -> None:
-        """应用 QSS 样式"""
-        qss = StyleManager.get_global_stylesheet()
-        dialog_qss = StyleManager.get_dialog_stylesheet()
-        self.setStyleSheet(qss + dialog_qss)
-
     def save(self) -> None:
         """保存时间段"""
         if self.name_edit is None:
@@ -145,7 +136,7 @@ class PeriodEditDialog(QDialog):
 
         start = parse_date_str(start_date)
         end = parse_date_str(end_date)
-        if start > end:
+        if start is not None and end is not None and start > end:
             QMessageBox.warning(self, "提示", "开始日期不能晚于结束日期")
             return
 

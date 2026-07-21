@@ -89,19 +89,32 @@ pytest tests/test_business.py -v
 ```
 qzct-login/
 ├── main.py              # 程序入口
-├── business.py          # 业务逻辑
-├── system_core.py       # 系统核心
-├── infrastructure.py    # 基础设施
-├── concurrency.py       # 并发框架
-├── constants.py         # 常量配置
+├── concurrency.py       # 并发框架（TaskChain / TaskExecutor）
+├── constants.py         # 常量配置（路径、登录URL等单一来源）
 ├── exceptions.py        # 自定义异常
+├── core/                # 核心领域层
+│   ├── __init__.py      # 包重导出
+│   ├── config.py        # 配置管理（ConfigManager / global_config）
+│   ├── encryption.py    # 加密/解密（Fernet + 主密码派生）
+│   ├── lunar.py         # 农历工具（LunarUtils）
+│   └── date_rules.py    # 日期判断规则（should_work_today）
+├── infra/               # 基础设施层
+│   ├── __init__.py      # 包重导出
+│   ├── logging.py       # 日志系统（Logger / StreamRedirector）
+│   ├── thread_pool.py   # 线程池管理（ThreadPoolManager）
+│   └── date_utils.py    # 日期工具函数
+├── services/            # 业务服务层
+│   ├── __init__.py      # 包重导出
+│   ├── wifi.py          # WiFi 连接管理
+│   ├── campus_login.py  # 校园网认证登录
+│   ├── shutdown.py      # 定时关机
+│   └── tasks.py         # 任务编排（@task 装饰函数）
 ├── gui/                 # GUI 模块
 │   ├── main_window.py
 │   ├── style_manager.py
 │   ├── dialogs/
 │   └── widgets/
 ├── utils/               # 工具模块
-│   ├── logger.py
 │   └── version.py
 └── tests/               # 测试模块
     ├── conftest.py
@@ -190,7 +203,7 @@ def test_new_feature():
 ### 启用调试日志
 
 ```python
-from infrastructure import init_logger
+from infra.logging import init_logger
 
 init_logger(level=0)  # DEBUG 级别
 ```
@@ -211,7 +224,7 @@ breakpoint()
 
 ### Q: 如何添加新的 ISP 支持？
 
-在 `system_core.py` 中的 `ISP_MAPPING` 添加新条目：
+在 `core/config.py` 中的 `ISP_MAPPING` 添加新条目：
 
 ```python
 ISP_MAPPING = {
@@ -233,7 +246,7 @@ CAMPUS_LOGIN_CONFIG = {
 
 ### Q: 如何添加新的日期规则？
 
-在 `system_core.py` 的 `should_work_today()` 函数中添加新逻辑。
+在 `core/date_rules.py` 的 `should_work_today()` 函数中添加新逻辑。
 
 ## 发布流程
 

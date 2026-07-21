@@ -3,74 +3,45 @@
 使用主题系统重构的节假日编辑组件
 """
 
-from typing import Any, Dict, List, Optional
+import copy
+from typing import Any
 
 from PyQt5.QtCore import QDate
 from PyQt5.QtWidgets import (
-    QAbstractItemView,
     QDateEdit,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
-    QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from gui.style_helpers import (
-    create_button,
-    create_card_widget,
-    create_section_title,
-    create_tip_label,
-)
-from gui.style_manager import StyleManager
-from system_core import DEFAULT_CONFIG, global_config
+from core.config import DEFAULT_CONFIG, global_config
+from gui.styling.widgets import create_button, create_card_widget
+from gui.widgets.base_list_editor import BaseListEditorWidget
 
 
-class BaseHolidayWidget(QWidget):
+class BaseHolidayWidget(BaseListEditorWidget):
     """基础节假日组件"""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.holiday_periods: List[Dict[str, Any]] = global_config.get(
-            "HOLIDAY_PERIODS", DEFAULT_CONFIG["HOLIDAY_PERIODS"]
-        )[:]
+    def __init__(self, parent: QWidget | None = None) -> None:
+        self.holiday_periods: list[dict[str, Any]] = copy.deepcopy(
+            global_config.get("HOLIDAY_PERIODS", DEFAULT_CONFIG["HOLIDAY_PERIODS"])
+        )
+        self.name_edit: QLineEdit | None = None
+        self.start_edit: QDateEdit | None = None
+        self.end_edit: QDateEdit | None = None
 
-        # 组件引用
-        self.table: Optional[QTableWidget] = None
-        self.name_edit: Optional[QLineEdit] = None
-        self.start_edit: Optional[QDateEdit] = None
-        self.end_edit: Optional[QDateEdit] = None
+        super().__init__(
+            parent=parent,
+            title="\U0001f389 基础节假日列表",
+            tip="管理国务院发布的法定节假日，节假日期间不执行联网和关机任务",
+            columns=["名称", "开始日期", "结束日期"],
+        )
 
-        self.init_ui()
-        self._apply_styles()
-
-    def _apply_styles(self) -> None:
-        """应用 QSS 样式"""
-        self.setStyleSheet(StyleManager.get_global_stylesheet())
-
-    def init_ui(self) -> None:
-        """初始化 UI"""
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-
-        # 标题和提示
-        header_layout = QVBoxLayout()
-        header_layout.setSpacing(5)
-
-        title = create_section_title("\U0001f389 基础节假日列表")
-        header_layout.addWidget(title)
-
-        tip_label = create_tip_label("管理国务院发布的法定节假日，节假日期间不执行联网和关机任务")
-        header_layout.addWidget(tip_label)
-
-        main_layout.addLayout(header_layout)
-
-        # 编辑区域
+    def _setup_edit_area(self, layout: QVBoxLayout) -> None:
         edit_frame = create_card_widget()
         edit_frame.setObjectName("holidayEditFrame")
         edit_layout = QHBoxLayout(edit_frame)
@@ -98,63 +69,29 @@ class BaseHolidayWidget(QWidget):
         edit_layout.addWidget(self.end_edit)
 
         add_btn = create_button("\u2795 添加", btn_type="success", min_width=80)
-        add_btn.clicked.connect(self.add_period)
+        add_btn.clicked.connect(self.add_item)
         edit_layout.addWidget(add_btn)
 
-        main_layout.addWidget(edit_frame)
+        layout.addWidget(edit_frame)
 
-        # 表格区域
-        self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["名称", "开始日期", "结束日期"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
-        main_layout.addWidget(self.table)
+    # ------------------------------------------------------------------
+    # 数据操作钩子
+    # ------------------------------------------------------------------
 
-        # 按钮区域
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
+    def _get_items(self) -> list[dict[str, Any]]:
+        return self.holiday_periods
 
-        edit_btn = create_button("\u270f\ufe0f 编辑", btn_type="primary", min_width=100)
-        edit_btn.clicked.connect(self.edit_period)
-        btn_layout.addWidget(edit_btn)
+    def _set_items(self, items: list[dict[str, Any]]) -> None:
+        self.holiday_periods = items
 
-        delete_btn = create_button("\u274c 删除", btn_type="danger", min_width=100)
-        delete_btn.clicked.connect(self.delete_period)
-        btn_layout.addWidget(delete_btn)
+    def _row_to_cells(self, item: dict[str, Any]) -> list[QTableWidgetItem]:
+        return [
+            QTableWidgetItem(item.get("name", "")),
+            QTableWidgetItem(item.get("start", "")),
+            QTableWidgetItem(item.get("end", "")),
+        ]
 
-        btn_layout.addStretch()
-
-        clear_btn = create_button("\U0001f5d1\ufe0f 清空所有", btn_type="gray", min_width=100)
-        clear_btn.clicked.connect(self.clear_all)
-        btn_layout.addWidget(clear_btn)
-
-        main_layout.addLayout(btn_layout)
-
-        # 加载数据
-        self.load_holidays()
-
-    def update_theme(self) -> None:
-        """更新主题样式"""
-        self._apply_styles()
-
-    def load_holidays(self) -> None:
-        """加载节假日到表格"""
-        if self.table is None:
-            return
-
-        self.table.setRowCount(0)
-        for row, period in enumerate(self.holiday_periods):
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(period.get("name", "")))
-            self.table.setItem(row, 1, QTableWidgetItem(period.get("start", "")))
-            self.table.setItem(row, 2, QTableWidgetItem(period.get("end", "")))
-
-    def add_period(self) -> None:
-        """添加节假日"""
+    def _add_item(self) -> None:
         if self.name_edit is None or self.start_edit is None or self.end_edit is None:
             return
 
@@ -166,39 +103,21 @@ class BaseHolidayWidget(QWidget):
         start_date = self.start_edit.date().toString("yyyy-MM-dd")
         end_date = self.end_edit.date().toString("yyyy-MM-dd")
 
-        from infrastructure import parse_date_str
+        from infra.date_utils import parse_date_str
 
         start = parse_date_str(start_date)
         end = parse_date_str(end_date)
-        if start > end:
+        if start is not None and end is not None and start > end:
             QMessageBox.warning(self, "提示", "开始日期不能晚于结束日期")
             return
 
-        new_period = {
-            "name": name,
-            "start": start_date,
-            "end": end_date,
-        }
-        self.holiday_periods.append(new_period)
-        self.holiday_periods.sort(key=lambda x: x["start"])
-        self.load_holidays()
-
-        # 清空输入
+        self.holiday_periods.append({"name": name, "start": start_date, "end": end_date})
         self.name_edit.clear()
 
-    def edit_period(self) -> None:
-        """编辑节假日"""
-        if self.table is None:
+    def _edit_item(self, row: int) -> None:
+        if row < 0 or row >= len(self.holiday_periods):
             return
-
-        selected_rows = self.table.selectedItems()
-        if not selected_rows:
-            QMessageBox.warning(self, "提示", "请先选择要编辑的节假日")
-            return
-
-        row = selected_rows[0].row()
         period = self.holiday_periods[row]
-
         from gui.dialogs.period_edit_dialog import PeriodEditDialog
 
         dialog = PeriodEditDialog(
@@ -215,34 +134,15 @@ class BaseHolidayWidget(QWidget):
                 "start": dialog.result_period["start"],
                 "end": dialog.result_period["end"],
             }
-            self.holiday_periods.sort(key=lambda x: x["start"])
-            self.load_holidays()
 
-    def delete_period(self) -> None:
-        """删除节假日"""
-        if self.table is None:
-            return
+    def _sort_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(items, key=lambda x: x["start"])
 
-        selected_rows = self.table.selectedItems()
-        if not selected_rows:
-            QMessageBox.warning(self, "提示", "请先选择要删除的节假日")
-            return
+    def _get_select_warning_text(self) -> str:
+        return "请先选择要编辑的节假日"
 
-        row = selected_rows[0].row()
-        self.holiday_periods.pop(row)
-        self.load_holidays()
-
-    def clear_all(self) -> None:
-        """清空所有节假日"""
-        reply = QMessageBox.question(
-            self,
-            "确认",
-            "确定要清空所有节假日吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self.holiday_periods.clear()
-            self.load_holidays()
+    def _get_clear_confirm_text(self) -> str:
+        return "确定要清空所有节假日吗？"
 
     def save_holidays(self) -> None:
         """保存节假日到配置"""

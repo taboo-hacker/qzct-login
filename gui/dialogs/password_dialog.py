@@ -3,7 +3,6 @@
 使用组件工厂重构的密码对话框
 """
 
-from typing import Optional
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
@@ -16,23 +15,22 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from gui.style_helpers import create_button, create_card_widget, create_label
-from gui.style_manager import StyleManager
-from gui.styles import FontSize
+from gui.styling.constants import FontSize
+from gui.styling.widgets import create_button, create_card_widget, create_label
 
 
 class ChangeMasterPasswordDialog(QDialog):
     """更改主密码对话框"""
 
-    def __init__(self, parent: Optional[QDialog] = None) -> None:
+    def __init__(self, parent: QDialog | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("更改主密码")
         self.setFixedSize(450, 320)
 
         # 控件引用
-        self.old_password_edit: Optional[QLineEdit] = None
-        self.new_password_edit: Optional[QLineEdit] = None
-        self.confirm_password_edit: Optional[QLineEdit] = None
+        self.old_password_edit: QLineEdit | None = None
+        self.new_password_edit: QLineEdit | None = None
+        self.confirm_password_edit: QLineEdit | None = None
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
@@ -97,14 +95,6 @@ class ChangeMasterPasswordDialog(QDialog):
         main_layout.addLayout(btn_layout)
         main_layout.addSpacing(15)
 
-        self._apply_styles()
-
-    def _apply_styles(self) -> None:
-        """应用 QSS 样式"""
-        qss = StyleManager.get_global_stylesheet()
-        dialog_qss = StyleManager.get_dialog_stylesheet()
-        self.setStyleSheet(qss + dialog_qss)
-
     def change_password(self) -> None:
         """更改主密码"""
         if (
@@ -130,7 +120,7 @@ class ChangeMasterPasswordDialog(QDialog):
             QMessageBox.warning(self, "提示", "两次输入的新密码不一致")
             return
 
-        from system_core import change_master_password
+        from core.config import change_master_password
 
         success = change_master_password(old_password, new_password)
 

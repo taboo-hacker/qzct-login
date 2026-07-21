@@ -1,12 +1,12 @@
 import os
 import sys
 
-from infrastructure import debug, error, warning
+from infra.logging import debug, error, warning
 
-_cached_project_version = None
+_cached_project_version: str | None = None
 
 
-def get_project_version():
+def get_project_version() -> str:
     """
     从 pyproject.toml 中读取项目版本号
 
@@ -74,10 +74,10 @@ def get_project_version():
                 _cached_project_version = "1.0.0"
                 return _cached_project_version
 
-        version = data.get("project", {}).get("version", "1.0.0")
-        _cached_project_version = version
-        debug("main", f"从 pyproject.toml 读取到版本号: {version}")
-        return version
+        version_str: str = str(data.get("project", {}).get("version", "1.0.0"))
+        _cached_project_version = version_str
+        debug("main", f"从 pyproject.toml 读取到版本号: {version_str}")
+        return version_str
 
     except Exception as e:
         error("main", f"读取 pyproject.toml 失败: {e}", exc_info=True)

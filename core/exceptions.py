@@ -4,13 +4,11 @@
 定义项目中使用的自定义异常类，提供更精细的异常处理。
 """
 
-from typing import Optional
-
 
 class QZCTError(Exception):
     """QZCT 项目基础异常类"""
 
-    def __init__(self, message: str, details: Optional[str] = None) -> None:
+    def __init__(self, message: str, details: str | None = None) -> None:
         self.message = message
         self.details = details
         super().__init__(self.message)
@@ -38,12 +36,6 @@ class WiFiConnectionError(WiFiError):
 
 class WiFiProfileError(WiFiError):
     """WiFi 配置文件异常"""
-
-    pass
-
-
-class WiFiTimeoutError(WiFiError):
-    """WiFi 连接超时异常"""
 
     pass
 
@@ -78,8 +70,8 @@ class CampusResponseError(CampusLoginError):
 class JSONPParseError(CampusResponseError):
     """JSONP 解析异常"""
 
-    def __init__(self, message: str, response_text: Optional[str] = None) -> None:
-        self.response_text = response_text[:100] if response_text else None
+    def __init__(self, message: str, response_text: str | None = None) -> None:
+        self.response_text = response_text[:500] if response_text else None
         super().__init__(message, self.response_text)
 
 
@@ -146,24 +138,6 @@ class TaskError(QZCTError):
     pass
 
 
-class TaskCancelledError(TaskError):
-    """任务取消异常"""
-
-    pass
-
-
-class TaskTimeoutError(TaskError):
-    """任务超时异常"""
-
-    pass
-
-
-class TaskChainError(TaskError):
-    """任务链异常"""
-
-    pass
-
-
 # ==========================================
 # 关机相关异常
 # ==========================================
@@ -173,22 +147,7 @@ class ShutdownError(QZCTError):
     pass
 
 
-class ShutdownPermissionError(ShutdownError):
-    """关机权限异常"""
-
-    pass
-
-
-# ==========================================
-# 日期规则相关异常
-# ==========================================
 class DateRuleError(QZCTError):
     """日期规则异常"""
-
-    pass
-
-
-class DateParseError(DateRuleError):
-    """日期解析异常"""
 
     pass

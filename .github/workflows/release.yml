@@ -3,11 +3,50 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（留空则从 pyproject.toml 读取）"
+        required: false
+        default: ""
 
 jobs:
-  build-and-publish:
-    name: 构建并发布
+  pre-release-check:
+    name: 发布前检查
     runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 缓存 pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-release-${{ hashFiles('pyproject.toml') }}
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: 运行测试
+        run: pytest tests/ -v --tb=short --cov --cov-report=term-missing
+
+      - name: Ruff 代码检查
+        run: ruff check --output-format=github .
+
+      - name: MyPy 类型检查
+        run: mypy --ignore-missing-imports core infra services gui utils main.py
+
+  build-windows-exe:
+    name: 构建 Windows 可执行文件
+    runs-on: windows-latest
+    needs: pre-release-check
     permissions:
       contents: write
 
@@ -18,31 +57,88 @@ jobs:
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+
+      - name: 缓存 pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-exe-${{ hashFiles('pyproject.toml') }}
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pyinstaller
+
+      - name: 构建 .exe
+        run: python build.py --clean --verify
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: qzct-login-windows
+          path: |
+            dist/qzct-login.exe
+            dist/qzct-login.exe.sha256
+          retention-days: 30
+
+      - name: 上传到 GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/qzct-login.exe
+            dist/qzct-login.exe.sha256
+          body: |
+            ## 下载安装
+
+            1. 下载 `qzct-login.exe`
+            2. 双击运行即可，无需安装 Python 环境
+            3. 校验文件完整性：`certutil -hashfile qzct-login.exe SHA256`
+
+            ## 校验和
+
+            见 `qzct-login.exe.sha256` 文件
+
+  build-wheel:
+    name: 构建 Wheel 包
+    runs-on: ubuntu-latest
+    needs: pre-release-check
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: 安装构建工具
         run: |
           python -m pip install --upgrade pip
           pip install build wheel twine
 
-      - name: 构建包
+      - name: 构建 Wheel
         run: python -m build
 
       - name: 发布到 PyPI
+        if: github.event_name == 'release'
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/*
-        continue-on-error: true
-
-      - name: 创建可执行文件
         run: |
-          pip install pyinstaller
-          pyinstaller --onefile --windowed --name "qzct-login" main.py
-        continue-on-error: true
+          if [ -z "$TWINE_PASSWORD" ]; then
+            echo "PYPI_API_TOKEN 未配置，跳过 PyPI 发布"
+          else
+            twine upload dist/*.whl
+          fi
 
-      - name: 上传可执行文件到 Release
-        uses: softprops/action-gh-release@v1
+      - name: 上传 Wheel 到 Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
         with:
-          files: dist/qzct-login.exe
-        continue-on-error: true
+          files: dist/*.whl

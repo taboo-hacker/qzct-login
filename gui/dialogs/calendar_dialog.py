@@ -4,11 +4,11 @@
 """
 
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from lunar_python import Solar
 from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtGui import QColor, QTextCharFormat
+from PyQt5.QtGui import QColor, QShowEvent, QTextCharFormat
 from PyQt5.QtWidgets import (
     QCalendarWidget,
     QDialog,
@@ -21,44 +21,44 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from gui.style_helpers import (
+from core.config import global_config
+from core.date_rules import should_work_today
+from gui.styling.constants import FontSize, FontStyle
+from gui.styling.theme_manager import ThemeManager
+from gui.styling.widgets import (
     create_card_widget,
     create_label,
 )
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle
-from infrastructure import debug, error, info, is_date_in_period, parse_date_str, warning
-from system_core import global_config, should_work_today
+from infra import debug, error, info, is_date_in_period, parse_date_str, warning
+
+# 星期名称常量（模块级，避免每次调用重新创建）
+WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+
+# _lunar_cache 的最大条目数
+_LUNAR_CACHE_MAX_SIZE = 400
 
 
 class CalendarDialog(QDialog):
     """万年历对话框"""
 
-    def __init__(self, parent: Optional[QDialog] = None) -> None:
+    def __init__(self, parent: QDialog | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("万年历 - 任务执行计划")
         self.setMinimumSize(750, 650)
-        self._lunar_cache: Dict[datetime.date, Dict[str, Any]] = {}
+        self._lunar_cache: dict[datetime.date, dict[str, Any]] = {}
 
         # 组件引用
-        self.calendar: Optional[QCalendarWidget] = None
-        self.solar_label: Optional[QLabel] = None
-        self.lunar_date_label: Optional[QLabel] = None
-        self.ganzhi_label: Optional[QLabel] = None
-        self.yi_label: Optional[QLabel] = None
-        self.ji_label: Optional[QLabel] = None
-        self.extra_info_label: Optional[QLabel] = None
-        self.work_status_label: Optional[QLabel] = None
+        self.calendar: QCalendarWidget | None = None
+        self.solar_label: QLabel | None = None
+        self.lunar_date_label: QLabel | None = None
+        self.ganzhi_label: QLabel | None = None
+        self.yi_label: QLabel | None = None
+        self.ji_label: QLabel | None = None
+        self.extra_info_label: QLabel | None = None
+        self.work_status_label: QLabel | None = None
 
         self.init_ui()
-        self._apply_styles()
         info("main", "万年历对话框初始化完成")
-
-    def _apply_styles(self) -> None:
-        """应用 QSS 样式"""
-        qss = StyleManager.get_global_stylesheet()
-        dialog_qss = StyleManager.get_dialog_stylesheet()
-        self.setStyleSheet(qss + dialog_qss)
 
     def init_ui(self) -> None:
         """初始化 UI"""
@@ -259,8 +259,7 @@ class CalendarDialog(QDialog):
             selected_date = self.calendar.selectedDate()
             date = datetime.date(selected_date.year(), selected_date.month(), selected_date.day())
 
-            weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-            weekday_str = weekday_names[date.weekday()]
+            weekday_str = WEEKDAY_NAMES[date.weekday()]
 
             if self.solar_label:
                 self.solar_label.setText(f"{date.year}年{date.month}月{date.day}日 ({weekday_str})")
@@ -359,7 +358,7 @@ class CalendarDialog(QDialog):
                 f"padding: 8px; border-radius: 5px; margin-top: 5px;"
             )
 
-    def _get_lunar_detail(self, date: datetime.date) -> Dict[str, Any]:
+    def _get_lunar_detail(self, date: datetime.date) -> dict[str, Any]:
         """获取完整万年历信息，使用缓存提高性能"""
         if date in self._lunar_cache:
             return self._lunar_cache[date]
@@ -376,13 +375,13 @@ class CalendarDialog(QDialog):
             month_ganzhi = lunar.getMonthInGanZhi()
             day_ganzhi = lunar.getDayInGanZhi()
             year_shengxiao = lunar.getYearShengXiao()
-            ganzhi_str = f"{year_ganzhi}年 ({year_shengxiao}年) " f"{month_ganzhi}月 {day_ganzhi}日"
+            ganzhi_str = f"{year_ganzhi}年 ({year_shengxiao}年) {month_ganzhi}月 {day_ganzhi}日"
 
             yi_list = lunar.getDayYi()
             ji_list = lunar.getDayJi()
             jieqi = lunar.getJieQi()
 
-            festivals: Dict[str, List[str]] = {"traditional": [], "solar": []}
+            festivals: dict[str, list[str]] = {"traditional": [], "solar": []}
             lunar_festivals = lunar.getFestivals()
             if lunar_festivals:
                 festivals["traditional"].extend(lunar_festivals)
@@ -406,6 +405,10 @@ class CalendarDialog(QDialog):
             }
 
             self._lunar_cache[date] = result
+            # 缓存超过上限时清空，防止内存无限增长
+            if len(self._lunar_cache) > _LUNAR_CACHE_MAX_SIZE:
+                self._lunar_cache.clear()
+                self._lunar_cache[date] = result
             return result
         except Exception as e:
             warning("main", f"农历转换失败：{e}")
@@ -419,7 +422,7 @@ class CalendarDialog(QDialog):
                 "other_info": "",
             }
 
-    def should_work_on_date(self, date: datetime.date) -> tuple:
+    def should_work_on_date(self, date: datetime.date) -> tuple[bool, str]:
         """判断指定日期是否需要执行任务"""
         try:
             result = should_work_today(date)
@@ -476,9 +479,9 @@ class CalendarDialog(QDialog):
             if self.calendar is None:
                 return
 
-            current_date = self.calendar.selectedDate()
-            current_year = current_date.year()
-            current_month = current_date.month()
+            current_qdate = self.calendar.selectedDate()
+            current_year = current_qdate.year()
+            current_month = current_qdate.month()
 
             debug("main", f"开始标记 {current_year}年{current_month}月 的执行日期")
 
@@ -490,12 +493,12 @@ class CalendarDialog(QDialog):
                     days=1
                 )
 
-            current_date = first_day
+            iter_date = first_day
             day_count = 0
-            while current_date <= last_day:
+            while iter_date <= last_day:
                 try:
-                    should_work, status = self.should_work_on_date(current_date)
-                    qt_date = QDate(current_date.year, current_date.month, current_date.day)
+                    should_work, status = self.should_work_on_date(iter_date)
+                    qt_date = QDate(iter_date.year, iter_date.month, iter_date.day)
 
                     if should_work:
                         self.calendar.setDateTextFormat(qt_date, QTextCharFormat())
@@ -512,9 +515,9 @@ class CalendarDialog(QDialog):
 
                     day_count += 1
                 except Exception as e:
-                    warning("main", f"标记日期 {current_date} 时出错: {e}")
+                    warning("main", f"标记日期 {iter_date} 时出错: {e}")
 
-                current_date += datetime.timedelta(days=1)
+                iter_date += datetime.timedelta(days=1)
 
             debug(
                 "main",
@@ -524,7 +527,7 @@ class CalendarDialog(QDialog):
             error("main", "标记执行日期时出错", exc_info=True)
             QMessageBox.warning(self, "错误", f"标记日历日期时出错: {str(e)}")
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, event: QShowEvent | None) -> None:
         """窗口显示时重新标记日期"""
         super().showEvent(event)
         self.mark_execution_dates()

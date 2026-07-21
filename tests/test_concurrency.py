@@ -3,17 +3,23 @@ concurrency.py 模块测试
 
 测试任务执行器、任务链、任务装饰器等功能。
 """
-import time
-from typing import Dict
 
-from concurrency import (
+import threading
+import time
+
+from PyQt5.QtWidgets import QApplication
+
+from infra.concurrency import (
     TaskChain,
     TaskContext,
     TaskExecutor,
-    get_registered_task,
-    list_registered_tasks,
     task,
 )
+
+
+def _ensure_qapp() -> QApplication:
+    """确保存在 QApplication 实例（Qt 信号机制所必需）。"""
+    return QApplication.instance() or QApplication([])
 
 
 class TestTaskContext:
@@ -83,27 +89,18 @@ class TestTaskDecorator:
         """测试任务装饰器"""
 
         @task("测试任务")
-        def sample_task(ctx: TaskContext) -> Dict:
+        def sample_task(ctx: TaskContext) -> dict:
             ctx.log("执行任务")
             return {"success": True}
 
         assert hasattr(sample_task, "task_name")
         assert sample_task.task_name == "测试任务"
 
-    def test_task_registration(self):
-        """测试任务注册"""
-
-        @task("注册测试任务")
-        def registered_task(ctx: TaskContext) -> Dict:
-            return {}
-
-        assert "注册测试任务" in list_registered_tasks()
-
     def test_task_execution(self):
         """测试任务执行"""
 
         @task("执行测试任务", timeout=30)
-        def executing_task(ctx: TaskContext) -> Dict:
+        def executing_task(ctx: TaskContext) -> dict:
             ctx.log("开始执行")
             ctx.set_progress(50)
             return {"done": True}
@@ -113,21 +110,6 @@ class TestTaskDecorator:
 
         assert result["done"] is True
         assert "开始执行" in ctx.get_logs()
-
-    def test_get_registered_task(self):
-        """测试获取已注册任务"""
-
-        @task("获取测试任务")
-        def task_to_get(ctx: TaskContext) -> Dict:
-            return {}
-
-        retrieved = get_registered_task("获取测试任务")
-        assert retrieved is not None
-
-    def test_get_nonexistent_task(self):
-        """测试获取不存在的任务"""
-        result = get_registered_task("不存在的任务")
-        assert result is None
 
 
 class TestTaskExecutor:
@@ -151,7 +133,7 @@ class TestTaskExecutor:
         executor = TaskExecutor()
 
         @task("提交测试")
-        def simple_task(ctx: TaskContext) -> Dict:
+        def simple_task(ctx: TaskContext) -> dict:
             return {"result": "ok"}
 
         future = executor.submit(simple_task, "提交测试")
@@ -162,7 +144,7 @@ class TestTaskExecutor:
         executor = TaskExecutor()
 
         @task("取消测试")
-        def long_task(ctx: TaskContext) -> Dict:
+        def long_task(ctx: TaskContext) -> dict:
             time.sleep(10)
             return {}
 
@@ -170,6 +152,11 @@ class TestTaskExecutor:
         executor.cancel_all()
 
         assert executor._cancelled is True
+        # 验证所有 context 的 cancel 标志已设置
+        with executor._lock:
+            for ctx in executor._contexts.values():
+                assert ctx.is_cancelled()
+        executor.shutdown(wait=False)
 
 
 class TestTaskChain:
@@ -187,7 +174,7 @@ class TestTaskChain:
         """测试添加任务到链"""
 
         @task("步骤1")
-        def step1(ctx: TaskContext) -> Dict:
+        def step1(ctx: TaskContext) -> dict:
             return {"step": 1}
 
         chain = TaskChain()
@@ -225,11 +212,11 @@ class TestTaskChain:
         """测试流式 API"""
 
         @task("步骤A")
-        def step_a(ctx: TaskContext) -> Dict:
+        def step_a(ctx: TaskContext) -> dict:
             return {}
 
         @task("步骤B")
-        def step_b(ctx: TaskContext) -> Dict:
+        def step_b(ctx: TaskContext) -> dict:
             return {}
 
         chain = (
@@ -243,16 +230,136 @@ class TestTaskChain:
         assert len(chain._steps) == 2
 
 
-class TestListRegisteredTasks:
-    """列出已注册任务测试"""
+class TestTaskChainExecute:
+    """TaskChain.execute() 集成测试"""
 
-    def test_list_registered_tasks(self):
-        """测试列出已注册任务"""
+    def test_chain_execute_sequential_success(self, qtbot):
+        """测试多个任务顺序执行成功"""
+        _ensure_qapp()
 
-        @task("列表测试任务")
-        def list_test_task(ctx: TaskContext) -> Dict:
-            return {}
+        @task("步骤1")
+        def step1(ctx: TaskContext) -> dict:
+            ctx.log("执行步骤1")
+            return {"step": 1}
 
-        tasks = list_registered_tasks()
-        assert isinstance(tasks, list)
-        assert "列表测试任务" in tasks
+        @task("步骤2")
+        def step2(ctx: TaskContext) -> dict:
+            ctx.log("执行步骤2")
+            return {"step": 2}
+
+        @task("步骤3")
+        def step3(ctx: TaskContext) -> dict:
+            ctx.log("执行步骤3")
+            return {"step": 3}
+
+        done = threading.Event()
+        captured = {}
+
+        def on_success(success, results):
+            captured["success"] = success
+            captured["results"] = results
+            done.set()
+
+        chain = (
+            TaskChain()
+            .add(step1, "步骤1")
+            .add(step2, "步骤2")
+            .add(step3, "步骤3")
+            .on_success(on_success)
+        )
+
+        executor = chain.execute()
+        try:
+            # 轮询事件循环，等待回调触发
+            timeout = 10.0
+            elapsed = 0.0
+            interval = 0.05
+            while not done.is_set() and elapsed < timeout:
+                QApplication.processEvents()
+                time.sleep(interval)
+                elapsed += interval
+
+            assert done.is_set(), "on_success 回调未在超时内触发"
+            assert captured["success"] is True
+            assert "步骤1" in captured["results"]
+            assert "步骤2" in captured["results"]
+            assert "步骤3" in captured["results"]
+            assert captured["results"]["步骤1"]["step"] == 1
+            assert captured["results"]["步骤2"]["step"] == 2
+            assert captured["results"]["步骤3"]["step"] == 3
+        finally:
+            executor.shutdown(wait=False)
+
+    def test_chain_execute_failure_breaks_chain(self, qtbot):
+        """测试任务失败后中断后续任务"""
+        _ensure_qapp()
+
+        @task("成功步骤")
+        def step1(ctx: TaskContext) -> dict:
+            ctx.log("执行成功步骤")
+            return {"ok": True}
+
+        @task("失败步骤")
+        def step2(ctx: TaskContext) -> dict:
+            ctx.log("执行失败步骤")
+            raise ValueError("故意失败")
+
+        @task("不应执行")
+        def step3(ctx: TaskContext) -> dict:
+            ctx.log("此任务不应被执行")
+            return {"step": 3}
+
+        done = threading.Event()
+        captured = {}
+
+        def on_error(results):
+            captured["results"] = results
+            done.set()
+
+        chain = (
+            TaskChain()
+            .add(step1, "成功步骤")
+            .add(step2, "失败步骤")
+            .add(step3, "不应执行")
+            .on_error(on_error)
+        )
+
+        executor = chain.execute()
+        try:
+            timeout = 10.0
+            elapsed = 0.0
+            interval = 0.05
+            while not done.is_set() and elapsed < timeout:
+                QApplication.processEvents()
+                time.sleep(interval)
+                elapsed += interval
+
+            assert done.is_set(), "on_error 回调未在超时内触发"
+            # 成功步骤的结果应被记录
+            assert "成功步骤" in captured["results"]
+            # 失败步骤应包含错误信息
+            assert "失败步骤" in captured["results"]
+            assert "error" in captured["results"]["失败步骤"]
+            # 第三个任务不应被执行：其结果不应出现在 results 中
+            assert "不应执行" not in captured["results"]
+        finally:
+            executor.shutdown(wait=False)
+
+    def test_chain_execute_empty_steps(self):
+        """测试空任务链直接调用 on_success"""
+        _ensure_qapp()
+
+        captured = {}
+
+        def on_success(success, results):
+            captured["success"] = success
+            captured["results"] = results
+
+        chain = TaskChain().on_success(on_success)
+
+        result = chain.execute()
+
+        # 空步骤链不创建 executor，直接同步回调
+        assert result is None
+        assert captured["success"] is True
+        assert captured["results"] == {}

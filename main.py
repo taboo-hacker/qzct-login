@@ -1,34 +1,44 @@
+import signal
 import sys
 import traceback
+from types import TracebackType
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import QApplication
 
-from gui.main_window import MainWindow
-from gui.style_manager import StyleManager, ThemeManager
-from system_core import global_config, load_config
+from core.config import global_config
 
 
-def apply_global_theme(app: QApplication) -> None:
-    theme_name = global_config.get("THEME", "light")
-    ThemeManager.set_theme(theme_name)
-    qss = StyleManager.get_global_stylesheet()
-    app.setStyleSheet(qss)
-
-
-def main():
+def main() -> None:
     """主函数 - 程序入口点"""
 
-    def _excepthook(etype, evalue, tb):
+    def _excepthook(
+        etype: type[BaseException],
+        evalue: BaseException,
+        tb: TracebackType | None,
+    ) -> None:
+        # KeyboardInterrupt 静默退出，不记日志
+        if issubclass(etype, KeyboardInterrupt):
+            return
         msg = f"Fatal error: {etype.__name__}: {evalue}\n{traceback.format_exc()}"
-        print(msg, file=sys.stderr)
+        # 在打包模式（console=False）下 stderr 不可见，写到日志文件
         try:
-            from infrastructure import error
+            from infra.logging import error
 
             error("main", f"未捕获的异常: {etype.__name__}: {evalue}", exc_info=True)
         except Exception:
-            pass  # 日志系统尚未初始化时静默忽略
+            # 日志系统尚未初始化时写到文件
+            try:
+                import os
+
+                from core.constants import CONFIG_DIR
+
+                crash_log = os.path.join(CONFIG_DIR, "crash.log")
+                with open(crash_log, "a", encoding="utf-8") as f:
+                    f.write(msg + "\n")
+            except Exception:
+                pass
 
     sys.excepthook = _excepthook
 
@@ -43,11 +53,20 @@ def main():
     app.setApplicationName("校园网自动登录")
     app.setOrganizationName("QZCT")
 
-    apply_global_theme(app)
+    # 全局字体
+    app.setFont(QFont("Microsoft YaHei", 9))  # type: ignore[attr-defined]
 
-    app.setFont(QFont("Microsoft YaHei", 10))
+    # 读取主题偏好（仅用于日志级别配色等最小配色，不渲染 QSS）
+    _ = global_config.get("THEME", "light")
+
+    from gui.main_window import MainWindow
+
     window = MainWindow()
     window.show()
+
+    # 允许 Ctrl+C 在终端中干净退出
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     sys.exit(app.exec())
 
 

@@ -3,7 +3,7 @@
 现代卡片式设计，支持主题切换
 """
 
-from typing import Optional
+from collections.abc import Callable
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
@@ -14,22 +14,23 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from core.config import DEFAULT_CONFIG, global_config, save_config
 from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
-from gui.style_helpers import (
+from gui.styling.constants import FontSize
+from gui.styling.theme_manager import ThemeManager
+from gui.styling.widgets import (
     create_button,
     create_label,
     create_section_title,
     create_tip_label,
 )
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize
 from gui.widgets import BaseHolidayWidget, CompensatoryWorkdayWidget, DateRuleWidget
-from system_core import DEFAULT_CONFIG, global_config, save_config
 
 # 解密失败的字段在 UI 中显示此占位符
 _DECRYPT_FAILED_PLACEHOLDER = "********"
@@ -38,7 +39,7 @@ _DECRYPT_FAILED_PLACEHOLDER = "********"
 class SettingsDialog(QDialog):
     """配置设置对话框"""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("配置设置")
         self.setMinimumSize(850, 650)
@@ -46,26 +47,25 @@ class SettingsDialog(QDialog):
         # 注意：不要在构造函数中调用 load_config()！
         # MainWindow 启动时已经加载过配置，这里再调会重置 global_config 导致设置显示空白。
         # 控件引用
-        self.tab_widget: Optional[QTabWidget] = None
-        self.wifi_name_edit: Optional[QLineEdit] = None
-        self.wifi_password_edit: Optional[QLineEdit] = None
-        self.wifi_retry_edit: Optional[QLineEdit] = None
-        self.retry_interval_edit: Optional[QLineEdit] = None
-        self.username_edit: Optional[QLineEdit] = None
-        self.password_edit: Optional[QLineEdit] = None
-        self.isp_combo: Optional[QComboBox] = None
-        self.wan_ip_edit: Optional[QLineEdit] = None
-        self.shutdown_hour_edit: Optional[QLineEdit] = None
-        self.shutdown_min_edit: Optional[QLineEdit] = None
-        self.date_rule_widget: Optional[DateRuleWidget] = None
-        self.compensatory_widget: Optional[CompensatoryWorkdayWidget] = None
-        self.base_holiday_widget: Optional[BaseHolidayWidget] = None
-        self.show_lunar_check: Optional[QCheckBox] = None
-        self.lunar_format_combo: Optional[QComboBox] = None
-        self.theme_combo: Optional[QComboBox] = None
+        self.tab_widget: QTabWidget | None = None
+        self.wifi_name_edit: QLineEdit | None = None
+        self.wifi_password_edit: QLineEdit | None = None
+        self.wifi_retry_edit: QLineEdit | None = None
+        self.retry_interval_edit: QLineEdit | None = None
+        self.username_edit: QLineEdit | None = None
+        self.password_edit: QLineEdit | None = None
+        self.isp_combo: QComboBox | None = None
+        self.wan_ip_edit: QLineEdit | None = None
+        self.shutdown_hour_edit: QLineEdit | None = None
+        self.shutdown_min_edit: QLineEdit | None = None
+        self.date_rule_widget: DateRuleWidget | None = None
+        self.compensatory_widget: CompensatoryWorkdayWidget | None = None
+        self.base_holiday_widget: BaseHolidayWidget | None = None
+        self.show_lunar_check: QCheckBox | None = None
+        self.lunar_format_combo: QComboBox | None = None
+        self.theme_combo: QComboBox | None = None
 
         self._init_ui()
-        self._apply_styles()
 
     def _is_field_decrypt_failed(self, field_name: str) -> bool:
         """检查指定字段是否解密失败"""
@@ -148,11 +148,11 @@ class SettingsDialog(QDialog):
 
     def _on_theme_changed(self, index: int) -> None:
         """主题切换处理"""
+        assert self.theme_combo is not None
         theme_name = self.theme_combo.itemData(index)
         if theme_name:
             ThemeManager.set_theme(theme_name)
             global_config["THEME"] = theme_name
-            self._apply_styles()
             self._update_child_themes()
 
     def _update_child_themes(self) -> None:
@@ -345,13 +345,7 @@ class SettingsDialog(QDialog):
 
         parent_layout.addLayout(button_box)
 
-    def _apply_styles(self) -> None:
-        """应用 QSS 样式"""
-        qss = StyleManager.get_global_stylesheet()
-        dialog_qss = StyleManager.get_dialog_stylesheet()
-        self.setStyleSheet(qss + dialog_qss)
-
-    def _create_password_field(self, field_name: str) -> tuple:
+    def _create_password_field(self, field_name: str) -> tuple[QLineEdit, QPushButton, QHBoxLayout]:
         """创建带显示/隐藏切换的密码输入框"""
         edit = QLineEdit()
         self._set_password_field_text(edit, field_name)
@@ -361,14 +355,14 @@ class SettingsDialog(QDialog):
         btn = create_button("显示", btn_type="gray", font_size=10, min_height=34)
         btn.setCheckable(True)
         btn.setFixedWidth(60)
-        btn.clicked.connect(lambda: self.toggle_password_visibility(edit, btn))
+        btn.clicked.connect(self._make_toggle_handler(edit, btn))
 
         layout = QHBoxLayout()
         layout.addWidget(edit)
         layout.addWidget(btn)
         return edit, btn, layout
 
-    def toggle_password_visibility(self, password_edit: QLineEdit, button) -> None:
+    def toggle_password_visibility(self, password_edit: QLineEdit, button: QPushButton) -> None:
         """切换密码可见性"""
         if button.isChecked():
             password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
@@ -377,20 +371,47 @@ class SettingsDialog(QDialog):
             password_edit.setEchoMode(QLineEdit.EchoMode.Password)
             button.setText("显示")
 
+    def _make_toggle_handler(self, edit: QLineEdit, button: QPushButton) -> Callable[[], None]:
+        """为密码可见性切换创建独立回调，避免 lambda 形成引用链。"""
+
+        def _handler() -> None:
+            self.toggle_password_visibility(edit, button)
+
+        return _handler
+
     def save_config(self) -> None:
-        """保存配置"""
+        """保存配置——先收集到临时 dict，全部验证通过后统一写入 global_config"""
+        # _init_ui 保证以下控件已初始化
+        assert (
+            self.wifi_name_edit is not None
+            and self.wifi_password_edit is not None
+            and self.wifi_retry_edit is not None
+            and self.retry_interval_edit is not None
+            and self.username_edit is not None
+            and self.password_edit is not None
+            and self.isp_combo is not None
+            and self.wan_ip_edit is not None
+            and self.shutdown_hour_edit is not None
+            and self.shutdown_min_edit is not None
+            and self.show_lunar_check is not None
+            and self.lunar_format_combo is not None
+        )
+
+        # 先收集到临时 dict，全部验证通过后再写入 global_config
+        pending: dict[str, object] = {}
+
         # WiFi 配置
-        global_config["WIFI_NAME"] = self.wifi_name_edit.text()
+        pending["WIFI_NAME"] = self.wifi_name_edit.text()
 
         wifi_pwd = self.wifi_password_edit.text()
         if not self._is_password_placeholder(wifi_pwd):
-            global_config["WIFI_PASSWORD"] = wifi_pwd
+            pending["WIFI_PASSWORD"] = wifi_pwd
 
         try:
             val = int(self.wifi_retry_edit.text())
             if val < 0:
                 raise ValueError
-            global_config["MAX_WIFI_RETRY"] = val
+            pending["MAX_WIFI_RETRY"] = val
         except ValueError:
             QMessageBox.warning(self, "提示", "最大重试次数请输入非负整数")
             return
@@ -399,29 +420,29 @@ class SettingsDialog(QDialog):
             val = int(self.retry_interval_edit.text())
             if val < 1:
                 raise ValueError
-            global_config["RETRY_INTERVAL"] = val
+            pending["RETRY_INTERVAL"] = val
         except ValueError:
             QMessageBox.warning(self, "提示", "重试间隔请输入大于 0 的整数")
             return
 
         # 校园网登录配置
-        global_config["USERNAME"] = self.username_edit.text()
+        pending["USERNAME"] = self.username_edit.text()
 
         login_pwd = self.password_edit.text()
         if not self._is_password_placeholder(login_pwd):
-            global_config["PASSWORD"] = login_pwd
+            pending["PASSWORD"] = login_pwd
 
         isp_mapping = {0: "cmcc", 1: "telecom", 2: "unicom"}
-        global_config["ISP_TYPE"] = isp_mapping[self.isp_combo.currentIndex()]
+        pending["ISP_TYPE"] = isp_mapping[self.isp_combo.currentIndex()]
 
-        global_config["WAN_IP"] = self.wan_ip_edit.text()
+        pending["WAN_IP"] = self.wan_ip_edit.text()
 
         # 自动关机配置
         try:
             val = int(self.shutdown_hour_edit.text())
             if not (0 <= val <= 23):
                 raise ValueError
-            global_config["SHUTDOWN_HOUR"] = val
+            pending["SHUTDOWN_HOUR"] = val
         except ValueError:
             QMessageBox.warning(self, "提示", "关机小时请输入 0~23 之间的整数")
             return
@@ -430,7 +451,7 @@ class SettingsDialog(QDialog):
             val = int(self.shutdown_min_edit.text())
             if not (0 <= val <= 59):
                 raise ValueError
-            global_config["SHUTDOWN_MIN"] = val
+            pending["SHUTDOWN_MIN"] = val
         except ValueError:
             QMessageBox.warning(self, "提示", "关机分钟请输入 0~59 之间的整数")
             return
@@ -438,7 +459,7 @@ class SettingsDialog(QDialog):
         # 日期规则
         if self.date_rule_widget:
             self.date_rule_widget.save_rules()
-            global_config["DATE_RULES"] = self.date_rule_widget.date_rules
+            pending["DATE_RULES"] = self.date_rule_widget.date_rules
 
         # 调休上班日
         if self.compensatory_widget:
@@ -449,8 +470,12 @@ class SettingsDialog(QDialog):
             self.base_holiday_widget.save_holidays()
 
         # 应用程序设置
-        global_config["SHOW_LUNAR_CALENDAR"] = self.show_lunar_check.isChecked()
-        global_config["LUNAR_DISPLAY_FORMAT"] = self.lunar_format_combo.currentIndex()
+        pending["SHOW_LUNAR_CALENDAR"] = self.show_lunar_check.isChecked()
+        pending["LUNAR_DISPLAY_FORMAT"] = self.lunar_format_combo.currentIndex()
+
+        # 所有验证通过，统一写入 global_config
+        for key, value in pending.items():
+            global_config[key] = value
 
         if not save_config():
             QMessageBox.critical(self, "错误", "保存配置失败，请检查文件权限或查看日志")

@@ -1,15 +1,11 @@
 """
-基础设施模块
+日志系统模块（基于 Loguru）
 
-提供日志系统、线程池管理、工具函数等基础设施功能。
+提供日志器初始化、日志级别映射、输出流重定向等功能。
 """
 
-import datetime
-import os
 import sys
-from typing import Any, Dict, Optional
-
-from PyQt5.QtCore import QThreadPool
+from typing import Any, Optional
 
 from utils.logger import setup_logger
 
@@ -17,97 +13,8 @@ from utils.logger import setup_logger
 # 类型定义
 # ==========================================
 LogLevel = int
-PeriodDict = Dict[str, Any]
 
-# ==========================================
-# 工具函数模块
-# ==========================================
-
-
-def parse_date_str(date_str: Optional[str]) -> Optional[datetime.date]:
-    """
-    解析日期字符串为 date 对象
-
-    将 "YYYY-MM-DD" 格式的字符串转换为 Python datetime.date 对象。
-
-    Args:
-        date_str: 日期字符串，格式为 "YYYY-MM-DD"
-                  例如："2025-01-26"、"2026-02-14"
-
-    Returns:
-        解析后的日期对象，如果解析失败则返回 None
-
-    Examples:
-        >>> date = parse_date_str("2025-01-26")
-        >>> if date:
-        ...     print(date.year, date.month, date.day)
-        2025 1 26
-    """
-    if date_str is None:
-        return None
-    try:
-        return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-    except (ValueError, TypeError, AttributeError):
-        return None
-
-
-def is_date_in_period(check_date: datetime.date, period: PeriodDict) -> bool:
-    """
-    判断日期是否在指定的时间段内
-
-    检查给定的日期是否在时间段 [start, end] 范围内（闭区间）。
-
-    Args:
-        check_date: 要检查的日期
-        period: 时间段字典，包含以下键：
-            - start (str): 开始日期，"YYYY-MM-DD" 格式
-            - end (str): 结束日期，"YYYY-MM-DD" 格式
-            - name (str, optional): 时间段名称
-
-    Returns:
-        True 表示日期在时间段内，False 表示不在
-
-    Examples:
-        >>> today = datetime.date.today()
-        >>> period = {"name": "寒假", "start": "2025-01-10", "end": "2025-02-28"}
-        >>> if is_date_in_period(today, period):
-        ...     print("今天在寒假期间")
-    """
-    start_date = parse_date_str(period.get("start"))
-    end_date = parse_date_str(period.get("end"))
-    if not start_date or not end_date:
-        return False
-    return start_date <= check_date <= end_date
-
-
-def format_period(period: PeriodDict) -> str:
-    """
-    格式化时间段为可读字符串
-
-    将时间段字典转换为易读的显示格式。
-
-    Args:
-        period: 时间段字典，包含以下键：
-            - name (str): 时间段名称
-            - start (str): 开始日期
-            - end (str): 结束日期
-
-    Returns:
-        格式化后的字符串，格式："名称（YYYY-MM-DD ~ YYYY-MM-DD）"
-
-    Examples:
-        >>> period = {"name": "春节", "start": "2025-01-28", "end": "2025-02-04"}
-        >>> print(format_period(period))
-        春节（2025-01-28 ~ 2025-02-04）
-    """
-    return f"{period.get('name', '未命名')}（{period.get('start')} ~ {period.get('end')}）"
-
-
-# ==========================================
-# 日志系统模块（基于 Loguru）
-# ==========================================
-
-LOG_LEVEL_MAP: Dict[int, str] = {
+LOG_LEVEL_MAP: dict[int, str] = {
     0: "DEBUG",
     1: "INFO",
     2: "WARNING",
@@ -127,8 +34,8 @@ class Logger:
 
     def __init__(
         self,
-        gui_log_widget: Optional[Any] = None,
-        log_file_path: Optional[str] = None,
+        gui_log_widget: Any | None = None,
+        log_file_path: str | None = None,
         level: int = 1,
         max_log_size: int = 10 * 1024 * 1024,
         backup_count: int = 5,
@@ -179,11 +86,17 @@ class Logger:
         std_level = LOG_LEVEL_MAP.get(level, "INFO")
         if exc_info and level >= 3:
             self._loguru_logger.opt(exception=True).log(
-                std_level, "<{name}> {message}", name=module_name, message=message
+                std_level,
+                "<magenta><{name}></magenta> {message}",
+                name=module_name,
+                message=message,
             )
         else:
             self._loguru_logger.log(
-                std_level, "<{name}> {message}", name=module_name, message=message
+                std_level,
+                "<magenta><{name}></magenta> {message}",
+                name=module_name,
+                message=message,
             )
 
     def debug(self, module_name: str, message: str, exc_info: bool = False) -> None:
@@ -208,8 +121,8 @@ class Logger:
 
 
 def init_logger(
-    gui_log_widget: Optional[Any] = None,
-    log_file_path: Optional[str] = None,
+    gui_log_widget: Any | None = None,
+    log_file_path: str | None = None,
     level: int = 1,
 ) -> Logger:
     """
@@ -292,9 +205,8 @@ class StreamRedirector:
         Args:
             text: 要写入的文本
         """
-        if text.strip():
-            if logger:
-                logger.log(self.module_name, self.level, text.strip())
+        if text.strip() and logger:
+            logger.log(self.module_name, self.level, text.strip())
 
     def flush(self) -> None:
         """刷新输出缓冲区（空实现，保持兼容）"""
@@ -318,7 +230,9 @@ class StreamRedirector:
         Returns:
             文件描述符
         """
-        return sys.__stderr__.fileno()
+        if sys.__stderr__ is not None:
+            return sys.__stderr__.fileno()
+        return -1
 
     def readable(self) -> bool:
         """
@@ -346,71 +260,3 @@ class StreamRedirector:
             始终返回 False
         """
         return False
-
-
-# ==========================================
-# 线程池管理模块
-# ==========================================
-class ThreadPoolManager:
-    """
-    线程池管理器
-
-    管理全局线程池，提供任务提交和管理功能。
-    单例模式设计，确保整个应用只有一个线程池实例。
-    """
-
-    _instance: Optional["ThreadPoolManager"] = None
-
-    def __new__(cls) -> "ThreadPoolManager":
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init_thread_pool()
-        return cls._instance
-
-    def _init_thread_pool(self) -> None:
-        """初始化线程池"""
-        self.thread_pool = QThreadPool()
-        cpu_count = os.cpu_count() or 4
-        max_threads = min(cpu_count * 4, 16)
-        self.thread_pool.setMaxThreadCount(max_threads)
-        self.thread_pool.setStackSize(1024 * 1024)
-
-        info(
-            "infrastructure",
-            f"线程池初始化完成，最大线程数：{self.thread_pool.maxThreadCount()}",
-        )
-
-    def get_active_threads(self) -> int:
-        """
-        获取活跃线程数
-
-        Returns:
-            当前活跃的线程数量
-        """
-        return self.thread_pool.activeThreadCount()
-
-    def get_max_threads(self) -> int:
-        """
-        获取最大线程数
-
-        Returns:
-            线程池最大线程数量
-        """
-        return self.thread_pool.maxThreadCount()
-
-
-_thread_pool_manager: Optional[ThreadPoolManager] = None
-
-
-def get_thread_pool_manager() -> ThreadPoolManager:
-    """
-    获取线程池管理器实例（延迟初始化）
-
-    Returns:
-        ThreadPoolManager 单例实例
-    """
-    global _thread_pool_manager
-    if _thread_pool_manager is None:
-        info("infrastructure", "初始化线程池管理器")
-        _thread_pool_manager = ThreadPoolManager()
-    return _thread_pool_manager

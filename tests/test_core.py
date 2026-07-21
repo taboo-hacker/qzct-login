@@ -1,23 +1,23 @@
 """
-system_core.py 模块测试
+core 包模块测试
 
 测试加密模块、配置管理、日期判断等功能。
 """
+
 import datetime
 import os
 
 import pytest
 
-import system_core
-from system_core import (
-    LunarUtils,
+from core.config import ISP_MAPPING, get_config_snapshot, global_config
+from core.date_rules import should_work_today
+from core.encryption import (
     decrypt_data,
     encrypt_data,
     generate_derived_key_from_master_password,
-    get_config_snapshot,
     is_encrypted,
-    should_work_today,
 )
+from core.lunar import LunarUtils
 
 
 class TestLunarUtils:
@@ -149,8 +149,63 @@ class TestEncryption:
 
         encrypted = encrypt_data("secret_data", key1)
 
-        with pytest.raises(Exception):
+        from cryptography.fernet import InvalidToken
+
+        with pytest.raises(InvalidToken):
             decrypt_data(encrypted, key2)
+
+
+class TestEncryptionEdgeCases:
+    """加密模块边界和异常路径测试"""
+
+    @pytest.mark.parametrize("data", ["", None])
+    def test_encrypt_decrypt_empty(self, data):
+        from core.encryption import decrypt_data, encrypt_data
+
+        key, _ = generate_derived_key_from_master_password("test_pass")
+        assert encrypt_data(data, key) == data
+        assert decrypt_data(data, key) == data
+
+    def test_decrypt_invalid_base64(self):
+        import binascii
+
+        from cryptography.fernet import InvalidToken
+
+        from core.encryption import decrypt_data
+
+        key, _ = generate_derived_key_from_master_password("test_pass")
+        with pytest.raises((binascii.Error, InvalidToken)):
+            decrypt_data("not_valid_base64!!!", key)
+
+    def test_decrypt_tampered_data(self):
+        from core.encryption import decrypt_data, encrypt_data
+
+        key, _ = generate_derived_key_from_master_password("test_pass")
+        encrypted = encrypt_data("secret_data", key)
+        # 篡改加密数据
+        tampered = encrypted[:-5] + "XXXXX"
+        from cryptography.fernet import InvalidToken
+
+        with pytest.raises(InvalidToken):
+            decrypt_data(tampered, key)
+
+    @pytest.mark.parametrize(
+        "data,expected",
+        [
+            ("normal_string", False),
+            ("", False),
+            (None, False),
+            (123, False),
+            # 旧格式启发式判断已移除，无 ENC: 前缀一律视为未加密
+            ("Z0EAAAAAAAAAAAAAAAAAAAAAAAAA", False),
+            # 新格式：ENC: 前缀视为已加密
+            ("ENC:Z0EAAAAAAAAAAAAAAAAAAAAAAAAA", True),
+        ],
+    )
+    def test_is_encrypted_parametrized(self, data, expected):
+        from core.encryption import is_encrypted
+
+        assert is_encrypted(data) == expected
 
 
 class TestConfigManagement:
@@ -159,25 +214,24 @@ class TestConfigManagement:
     def test_get_config_snapshot(self, sample_config):
         """测试获取配置快照"""
 
-
-        system_core.global_config.clear()
-        system_core.global_config.update(sample_config)
+        global_config.clear()
+        global_config.update(sample_config)
 
         snapshot = get_config_snapshot()
 
         assert snapshot == sample_config
-        assert snapshot is not system_core.global_config
+        assert snapshot is not global_config
 
     def test_get_config_snapshot_is_deep_copy(self, sample_config):
         """测试配置快照是深拷贝"""
 
-        system_core.global_config.clear()
-        system_core.global_config.update(sample_config)
+        global_config.clear()
+        global_config.update(sample_config)
 
         snapshot = get_config_snapshot()
         snapshot["WIFI_NAME"] = "ModifiedWiFi"
 
-        assert system_core.global_config["WIFI_NAME"] == "TestWiFi"
+        assert global_config["WIFI_NAME"] == "TestWiFi"
 
 
 class TestDateRules:
@@ -186,8 +240,8 @@ class TestDateRules:
     def test_should_work_today_weekday(self, sample_config):
         """测试普通工作日"""
 
-        system_core.global_config.clear()
-        system_core.global_config.update(sample_config)
+        global_config.clear()
+        global_config.update(sample_config)
 
         monday = datetime.date(2026, 1, 5)
         result = should_work_today(monday)
@@ -200,8 +254,8 @@ class TestDateRules:
         # 这里清空调休列表，让测试单独检验周末规则。
         config = sample_config.copy()
         config["COMPENSATORY_WORKDAYS"] = []
-        system_core.global_config.clear()
-        system_core.global_config.update(config)
+        global_config.clear()
+        global_config.update(config)
 
         # 用 2026-01-10/11 周末（chinesecalendar 也判作假日，不存在调休）
         saturday = datetime.date(2026, 1, 10)
@@ -217,8 +271,8 @@ class TestDateRules:
         config["HOLIDAY_PERIODS"] = [
             {"name": "测试假期", "start": "2026-01-05", "end": "2026-01-07"}
         ]
-        system_core.global_config.clear()
-        system_core.global_config.update(config)
+        global_config.clear()
+        global_config.update(config)
 
         holiday = datetime.date(2026, 1, 6)
         result = should_work_today(holiday)
@@ -229,8 +283,8 @@ class TestDateRules:
 
         config = sample_config.copy()
         config["COMPENSATORY_WORKDAYS"] = ["2026-01-04"]
-        system_core.global_config.clear()
-        system_core.global_config.update(config)
+        global_config.clear()
+        global_config.update(config)
 
         compensatory_day = datetime.date(2026, 1, 4)
         result = should_work_today(compensatory_day)
@@ -250,8 +304,8 @@ class TestDateRules:
         }
         # 自定义规则下，调休工作日不应再覆盖周末/规则；清空调休数据
         config["COMPENSATORY_WORKDAYS"] = []
-        system_core.global_config.clear()
-        system_core.global_config.update(config)
+        global_config.clear()
+        global_config.update(config)
 
         # 2026-01-05 周一在 CUSTOM_HOLIDAY_PERIODS 内 -> False
         custom_holiday = datetime.date(2026, 1, 5)
@@ -271,8 +325,6 @@ class TestISPMapping:
 
     def test_isp_mapping_exists(self):
         """测试 ISP 映射存在"""
-        from system_core import ISP_MAPPING
-
         assert "cmcc" in ISP_MAPPING
         assert "telecom" in ISP_MAPPING
         assert "unicom" in ISP_MAPPING
@@ -280,8 +332,6 @@ class TestISPMapping:
 
     def test_isp_mapping_values(self):
         """测试 ISP 映射值"""
-        from system_core import ISP_MAPPING
-
         assert ISP_MAPPING["cmcc"] == "@cmcc"
         assert ISP_MAPPING["telecom"] == "@telecom"
         assert ISP_MAPPING["unicom"] == "@unicom"

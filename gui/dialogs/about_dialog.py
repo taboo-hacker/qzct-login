@@ -3,9 +3,10 @@
 使用组件工厂和主题系统重构的关于对话框
 """
 
-from typing import Optional
+from typing import cast
 
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QCloseEvent
 from PyQt5.QtWidgets import (
     QApplication,
     QDialog,
@@ -17,32 +18,32 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
 )
 
-from gui.style_helpers import (
+from gui.styling.constants import FontSize, FontStyle, StyleConstants
+from gui.styling.theme_manager import ThemeManager
+from gui.styling.widgets import (
     create_button,
     create_card_widget,
     create_label,
     create_section_title,
 )
-from gui.style_manager import StyleManager, ThemeManager
-from gui.styles import FontSize, FontStyle, StyleConstants
 from utils.version import get_project_version
 
 
 class AboutDialog(QDialog):
     """现代化关于对话框"""
 
-    def __init__(self, parent: Optional[QDialog] = None) -> None:
+    def __init__(self, parent: QDialog | None = None) -> None:
         super().__init__(parent)
         self.version: str = get_project_version()
-        self.version_btn: Optional[QPushButton] = None
+        self.version_btn: QPushButton | None = None
+        self._restore_timer: QTimer | None = None
         self._init_ui()
-        self._apply_styles()
 
     def _init_ui(self) -> None:
         """初始化 UI"""
         self.setWindowTitle("关于我们")
         self.setMinimumSize(520, 520)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)  # type: ignore[attr-defined]
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
@@ -168,7 +169,9 @@ class AboutDialog(QDialog):
             # 图标
             icon_label = QLabel(icon)
             icon_label.setFont(FontStyle.emoji(18))
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+            icon_label.setAlignment(
+                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter  # type: ignore[arg-type]
+            )
             icon_label.setFixedWidth(35)
             feature_layout.addWidget(icon_label)
 
@@ -257,18 +260,15 @@ class AboutDialog(QDialog):
         parent_layout.addSpacing(10)
         parent_layout.addWidget(bottom_frame)
 
-    def _apply_styles(self) -> None:
-        """应用 QSS 样式"""
-        qss = StyleManager.get_global_stylesheet()
-        dialog_qss = StyleManager.get_dialog_stylesheet()
-        self.setStyleSheet(qss + dialog_qss)
-
     def _copy_version(self) -> None:
         """复制版本号到剪贴板"""
         if self.version_btn is None:
             return
 
-        clipboard = QApplication.instance().clipboard()
+        app = QApplication.instance()
+        assert app is not None
+        app_instance = cast(QApplication, app)
+        clipboard = app_instance.clipboard()
         if clipboard:
             clipboard.setText(self.version)
 
@@ -278,10 +278,19 @@ class AboutDialog(QDialog):
         # 显示已复制状态
         self.version_btn.setText("\u2713 已复制")
 
-        # 2 秒后恢复
-        QTimer.singleShot(2000, lambda: self._restore_version_button(original_text))
+        # 2 秒后恢复（使用实例属性，closeEvent 中可停止）
+        self._restore_timer = QTimer(self)
+        self._restore_timer.setSingleShot(True)
+        self._restore_timer.timeout.connect(lambda: self._restore_version_button(original_text))
+        self._restore_timer.start(2000)
 
     def _restore_version_button(self, original_text: str) -> None:
         """恢复版本按钮文本"""
         if self.version_btn:
             self.version_btn.setText(original_text)
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:
+        """关闭时停止定时器，避免在对话框销毁后触发回调"""
+        if self._restore_timer is not None:
+            self._restore_timer.stop()
+        super().closeEvent(event)
