@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.3.0](https://img.shields.io/badge/Version-1.3.0-blue.svg)](pyproject.toml)
+[![Version: 1.4.0](https://img.shields.io/badge/Version-1.4.0-blue.svg)](pyproject.toml)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -123,7 +123,7 @@ qzct-login/
 ├── utils/
 │   ├── version.py              # 版本管理
 │   └── logger.py               # 日志工具（Loguru 配置）
-├── tests/                      # 测试模块（254 个测试，覆盖率 71%+）
+├── tests/                      # 测试模块（291 个测试用例）
 ├── .github/
 │   └── workflows/              # GitHub Actions (CI + Release)
 ├── pyproject.toml              # 项目配置
@@ -138,6 +138,11 @@ qzct-login/
 - [代码 Wiki](CODE_WIKI.md) - 项目架构和 API 文档
 
 ## 🔄 更新日志
+
+### v1.4.0 (2026-07-22)
+
+- 🔧 三轮深度审查，修复 133 个问题
+- 🧪 测试用例扩充至 291 个
 
 ### v1.3.0 (2026-05-24)
 
