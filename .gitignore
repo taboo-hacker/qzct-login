@@ -24,3 +24,6 @@ __pycache__/
 # 忽略操作系统文件
 Thumbs.db
 .DS_Store
+
+# 嵌套的 qzct-login 是独立仓库，不作为子目录提交
+/qzct-login/
