@@ -13,10 +13,12 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -81,17 +83,28 @@ class SettingsPanel(QWidget):
         self.tab_widget.setObjectName("settingsTab")
         main_layout.addWidget(self.tab_widget, 1)
 
-        # 创建所有标签页（一次性创建，不用懒加载避免 bug）
-        self.tab_widget.addTab(self._create_wifi_tab(), "WiFi")
-        self.tab_widget.addTab(self._create_login_tab(), "校园网登录")
-        self.tab_widget.addTab(self._create_shutdown_tab(), "定时关机")
-        self.tab_widget.addTab(self._create_date_rule_tab(), "日期规则")
-        self.tab_widget.addTab(self._create_compensatory_tab(), "调休上班")
-        self.tab_widget.addTab(self._create_base_holiday_tab(), "节假日")
-        self.tab_widget.addTab(self._create_app_tab(), "其他")
+        # 创建所有标签页（一次性创建，不用懒加载避免 bug）；
+        # 每个页面包一层滚动区域，窗口较小时内容可上下滚动不被截断
+        self.tab_widget.addTab(self._wrap_scrollable(self._create_wifi_tab()), "WiFi")
+        self.tab_widget.addTab(self._wrap_scrollable(self._create_login_tab()), "校园网登录")
+        self.tab_widget.addTab(self._wrap_scrollable(self._create_shutdown_tab()), "定时关机")
+        self.tab_widget.addTab(self._wrap_scrollable(self._create_date_rule_tab()), "日期规则")
+        self.tab_widget.addTab(self._wrap_scrollable(self._create_compensatory_tab()), "调休上班")
+        self.tab_widget.addTab(self._wrap_scrollable(self._create_base_holiday_tab()), "节假日")
+        self.tab_widget.addTab(self._wrap_scrollable(self._create_app_tab()), "其他")
 
         # 保存按钮
         self._create_save_row(main_layout)
+
+    @staticmethod
+    def _wrap_scrollable(widget: QWidget) -> QScrollArea:
+        """将标签页内容包进滚动区域（内容超高时可滚动查看）。"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setObjectName("settingsScroll")
+        scroll.setWidget(widget)
+        return scroll
 
     def _create_theme_selector(self, parent_layout: QVBoxLayout) -> None:
         """创建主题选择器"""
@@ -125,7 +138,7 @@ class SettingsPanel(QWidget):
         """获取主题显示名称"""
         display_map = {
             "light": "☀️ 亮色主题",
-            "dark": "U0001f319 暗色主题",
+            "dark": "\U0001f319 暗色主题",
         }
         return display_map.get(theme_name, theme_name)
 
@@ -301,11 +314,12 @@ class SettingsPanel(QWidget):
         save_row = QHBoxLayout()
         save_row.setContentsMargins(2, 2, 2, 2)
 
-        tip = create_tip_label('修改后点击"保存配置"生效')
+        tip = create_tip_label('点击右侧"保存配置"生效')
+        tip.setWordWrap(False)  # 保持单行，避免在窄窗口下换行
         save_row.addWidget(tip)
         save_row.addStretch()
 
-        save_btn = create_button("U0001f4be 保存配置", btn_type="success", min_width=110)
+        save_btn = create_button("\U0001f4be 保存配置", btn_type="success", min_width=110)
         save_btn.clicked.connect(self.save_config)
         save_row.addWidget(save_btn)
 

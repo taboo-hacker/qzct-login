@@ -136,6 +136,24 @@ class TestSettingsDialog:
         assert dialog.tab_widget is not None
         assert dialog.tab_widget.count() == 7
 
+    def test_tab_pages_are_scrollable(self, qtbot):
+        """每个设置子页包在滚动区域内（窗口小时可上下滚动，回归修复）"""
+        _ensure_qapp()
+        from core.config import DEFAULT_CONFIG
+
+        global_config.clear()
+        global_config.update(DEFAULT_CONFIG)
+
+        from PyQt5.QtWidgets import QScrollArea
+
+        from gui.dialogs.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        qtbot.addWidget(dialog)
+        for i in range(dialog.tab_widget.count()):
+            page = dialog.tab_widget.widget(i)
+            assert isinstance(page, QScrollArea), f"第 {i} 个设置子页不是滚动区域"
+
     def test_theme_selector(self, qtbot):
         _ensure_qapp()
         from core.config import DEFAULT_CONFIG
