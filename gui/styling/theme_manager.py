@@ -1,8 +1,8 @@
 """
 样式管理器
 
-使用 Qt Fusion 原生风格，不注入自定义 QSS。
-ThemeManager 仅保留日志级别配色等最小必要配色。
+统一管理主题配色与全局 QSS 样式表：切换主题时重新生成 QSS
+并应用到 QApplication，所有窗口与对话框立即重绘（真实主题切换）。
 """
 
 from typing import Optional
@@ -45,11 +45,25 @@ class ThemeManager:
 
     @classmethod
     def set_theme(cls, theme_name: str) -> None:
+        """设置当前主题并立即应用全局 QSS（若 QApplication 已存在）。"""
         if theme_name not in BUILTIN_THEMES and not (
             cls._instance and theme_name in cls._instance._custom_themes
         ):
             return
         cls._current_theme_name = theme_name
+        cls._apply_qss()
+
+    @classmethod
+    def _apply_qss(cls) -> None:
+        """将当前主题的全局 QSS 应用到 QApplication（尚未创建时跳过）。"""
+        from PyQt5.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if not isinstance(app, QApplication):
+            return
+        from gui.styling.qss import build_qss
+
+        app.setStyleSheet(build_qss(cls.current_theme()))
 
     @classmethod
     def available_themes(cls) -> list[str]:
@@ -65,7 +79,15 @@ class ThemeManager:
         cls._instance._custom_themes[name] = colors
 
     @classmethod
-    def apply_to_widget(cls, widget: QWidget, theme_name: str | None = None) -> None:  # noqa: ARG003
-        """Fusion 风格下无需注入 QSS"""
+    def apply_to_widget(
+        cls, widget: QWidget, theme_name: str | None = None  # noqa: ARG003
+    ) -> None:
+        """应用主题：指定名称则切换主题，否则按当前主题重刷全局 QSS。
+
+        实际重绘由 QApplication.setStyleSheet 完成，widget 参数仅为
+        兼容旧调用方保留。
+        """
         if theme_name:
             cls.set_theme(theme_name)
+        else:
+            cls._apply_qss()

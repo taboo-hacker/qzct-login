@@ -1,6 +1,7 @@
 """
 主窗口模块
-基于 Qt Fusion 原生风格
+简洁商务风界面：左侧"今日状态 + 任务操作"卡片，右侧运行日志，底部状态栏。
+视觉由全局 QSS 统一控制（gui/styling/qss.py），支持亮色/暗色主题即时切换。
 """
 
 import contextlib
@@ -9,14 +10,15 @@ import sys
 import time
 from typing import Any
 
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QCloseEvent
 from PyQt5.QtWidgets import (
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -24,10 +26,11 @@ from PyQt5.QtWidgets import (
 from core.config import global_config, load_config
 from core.constants import LOG_FILE
 from core.date_rules import should_work_today
-from gui.dialogs import AboutDialog, CalendarDialog, SettingsDialog
-from gui.styling.constants import FontSize, FontStyle
-from gui.styling.widgets import LogTextEdit, create_button
+from gui.dialogs import AboutDialog, SettingsPanel
+from gui.styling.theme_manager import ThemeManager
+from gui.styling.widgets import LogTextEdit, create_button, create_card_widget
 from gui.tray_manager import TrayManager
+from gui.widgets import CalendarView
 from infra import (
     StreamRedirector,
     error,
@@ -55,8 +58,8 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("校园网自动登录 + 定时关机")
-        self.setMinimumSize(600, 460)
-        self.resize(680, 500)
+        self.setMinimumSize(660, 460)
+        self.resize(800, 500)
         self._force_quit = False
         self._task_chain_started: bool = False
 
@@ -67,8 +70,10 @@ class MainWindow(QMainWindow):
         # 初始化日志（日志文件落盘到 ~/.qzct/qzct.log，5MB 轮转×5）
         init_logger(gui_log_widget=self.log_text, log_file_path=LOG_FILE, level=1)
 
-        # 加载配置
+        # 加载配置后应用保存的主题（全局 QSS 重绘）并刷新状态显示
         load_config()
+        self._apply_saved_theme()
+        self._update_status_display()
 
         # 重定向输出
         self._original_stdout = sys.stdout
@@ -95,139 +100,189 @@ class MainWindow(QMainWindow):
 
         info("main", "主窗口初始化完成")
 
+    def _apply_saved_theme(self) -> None:
+        """应用配置中保存的主题（在 load_config 之后调用，触发全局 QSS 重绘）。"""
+        theme_name = str(global_config.get("THEME", "light"))
+        ThemeManager.set_theme(theme_name)
+        # 万年历视图使用调色板/内联色，需要单独刷新
+        self._calendar_view.update_theme()
+
+    # ------------------------------------------------------------------
+    # UI 构建
+    # ------------------------------------------------------------------
+
     def _init_ui(self) -> None:
-        """构建界面"""
+        """构建界面：左侧状态/操作卡片 + 右侧日志卡片 + 底部状态行。"""
         central = QWidget()
+        central.setObjectName("appRoot")
         self.setCentralWidget(central)
 
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.setSpacing(6)
+        v_root = QVBoxLayout(central)
+        v_root.setContentsMargins(14, 12, 14, 8)
+        v_root.setSpacing(10)
 
-        # --- 菜单栏 ---
-        self._setup_menubar()
+        body = QHBoxLayout()
+        body.setSpacing(12)
 
-        # --- 状态区 ---
-        layout.addWidget(self._create_status_group())
+        # --- 左侧栏：状态 + 操作（单卡片） ---
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.addWidget(self._create_left_card())
+        left_panel.setFixedWidth(220)
+        body.addWidget(left_panel)
 
-        # --- 日志区 ---
-        layout.addWidget(self._create_log_group(), 1)
+        # --- 右侧：运行日志 / 任务日历 标签页 ---
+        body.addWidget(self._create_right_tabs(), 1)
 
-        # --- 底部按钮栏 ---
-        layout.addWidget(self._create_button_bar())
+        v_root.addLayout(body, 1)
+
+        # --- 底部状态行 ---
+        v_root.addLayout(self._create_footer())
 
         self._update_status_display()
 
-    def _setup_menubar(self) -> None:
-        """标准菜单栏"""
-        menubar = self.menuBar()
-        assert menubar is not None
+    @staticmethod
+    def _h_line() -> QFrame:
+        """卡片内分隔线。"""
+        line = QFrame()
+        line.setObjectName("divider")
+        line.setFixedHeight(1)
+        return line
 
-        menu_setting = menubar.addMenu("设置")
-        assert menu_setting is not None
-        act_config = menu_setting.addAction("配置设置")
-        assert act_config is not None
-        act_config.setShortcut("Ctrl+,")
-        act_config.triggered.connect(self.on_settings)
-        menu_setting.addSeparator()
-        act_cal = menu_setting.addAction("任务日历")
-        assert act_cal is not None
-        act_cal.setShortcut("Ctrl+K")
-        act_cal.triggered.connect(self.show_calendar)
+    def _create_left_card(self) -> QWidget:
+        """左侧单卡片：今日状态 + 分隔线 + 任务操作，比例紧凑对齐。"""
+        card = create_card_widget()
+        v = QVBoxLayout(card)
+        v.setContentsMargins(12, 10, 12, 10)
+        v.setSpacing(6)
 
-        menu_help = menubar.addMenu("帮助")
-        assert menu_help is not None
-        act_about = menu_help.addAction("关于")
-        assert act_about is not None
-        act_about.setShortcut("F1")
-        act_about.triggered.connect(self.show_about)
+        # ---- 今日状态 ----
+        title = QLabel("今日状态")
+        title.setProperty("role", "cardTitle")
+        v.addWidget(title)
 
-    def _create_status_group(self) -> QGroupBox:
-        """状态信息"""
-        group = QGroupBox("当前状态")
-        v = QVBoxLayout(group)
-        v.setSpacing(4)
-
-        row = QHBoxLayout()
-        row.setSpacing(24)
-
-        left = QVBoxLayout()
-        left.setSpacing(2)
+        # 日期（单行，不含多余修饰）
         self.date_label = QLabel()
-        left.addWidget(self.date_label)
-        self.status_label = QLabel()
-        left.addWidget(self.status_label)
-        row.addLayout(left)
+        self.date_label.setProperty("role", "dateBig")
+        v.addWidget(self.date_label)
 
-        right = QVBoxLayout()
-        right.setSpacing(2)
+        # 执行状态徽标
+        self.status_badge = QLabel()
+        self.status_badge.setProperty("role", "badge")
+        v.addWidget(self.status_badge, 0, Qt.AlignmentFlag.AlignLeft)
+
+        # 规则与关机时间
         self.rule_label = QLabel()
-        right.addWidget(self.rule_label)
+        self.rule_label.setProperty("role", "muted")
+        v.addWidget(self.rule_label)
         self.time_label = QLabel()
-        right.addWidget(self.time_label)
-        row.addLayout(right)
+        self.time_label.setProperty("role", "muted")
+        v.addWidget(self.time_label)
 
-        row.addStretch()
-        v.addLayout(row)
-        return group
+        # ---- 分隔 + 任务操作 ----
+        v.addWidget(self._h_line())
 
-    def _create_log_group(self) -> QGroupBox:
-        """日志区"""
-        group = QGroupBox("运行日志")
-        v = QVBoxLayout(group)
-        v.setSpacing(4)
+        action_title = QLabel("任务操作")
+        action_title.setProperty("role", "sectionTitle")
+        v.addWidget(action_title)
 
-        self.log_text.setMinimumHeight(140)
-        v.addWidget(self.log_text, 1)
-        return group
-
-    def _create_button_bar(self) -> QWidget:
-        """底部按钮行"""
-        bar = QWidget()
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(0, 4, 0, 0)
-        h.setSpacing(8)
-
-        self.run_btn = create_button("执行", btn_type="primary", min_width=90, font_size=12)
+        self.run_btn = create_button("立即执行", btn_type="primary", min_height=32)
         self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机 (Ctrl+R)")
         self.run_btn.setShortcut("Ctrl+R")
         self.run_btn.clicked.connect(self.on_run_once)
-        h.addWidget(self.run_btn)
+        v.addWidget(self.run_btn)
 
-        self.cancel_btn = create_button(
-            "取消关机", btn_type="outline_danger", min_width=90, font_size=12
-        )
+        self.cancel_btn = create_button("取消关机", btn_type="outline_danger", min_height=30)
         self.cancel_btn.setToolTip("取消已设置的关机任务")
         self.cancel_btn.clicked.connect(self.on_cancel_shutdown)
-        h.addWidget(self.cancel_btn)
+        v.addWidget(self.cancel_btn)
 
-        h.addSpacing(8)
-
-        self.test_wifi_btn = create_button("WiFi", btn_type="text", min_width=70, font_size=12)
+        # 单项测试（同高同宽，规整网格）
+        test_row = QHBoxLayout()
+        test_row.setSpacing(8)
+        self.test_wifi_btn = create_button("测试 WiFi", btn_type="outline", min_height=28)
         self.test_wifi_btn.setToolTip("仅测试 WiFi 连接")
         self.test_wifi_btn.clicked.connect(self.on_test_wifi)
-        h.addWidget(self.test_wifi_btn)
+        test_row.addWidget(self.test_wifi_btn, 1)
 
-        self.test_login_btn = create_button("登录", btn_type="text", min_width=70, font_size=12)
+        self.test_login_btn = create_button("测试登录", btn_type="outline", min_height=28)
         self.test_login_btn.setToolTip("仅测试校园网登录")
         self.test_login_btn.clicked.connect(self.on_test_login)
-        h.addWidget(self.test_login_btn)
+        test_row.addWidget(self.test_login_btn, 1)
+        v.addLayout(test_row)
 
-        self.exit_btn = create_button("退出", btn_type="text", min_width=60, font_size=12)
+        v.addStretch(1)
+        return card
+
+    def _create_right_tabs(self) -> QWidget:
+        """右侧标签页：运行日志 / 设置 / 任务日历（均嵌入式，不弹窗）。"""
+        self.main_tabs = QTabWidget()
+
+        # 标签页 1：运行日志
+        log_tab = QWidget()
+        log_v = QVBoxLayout(log_tab)
+        log_v.setContentsMargins(14, 12, 14, 12)
+        log_v.setSpacing(8)
+        title_row = QHBoxLayout()
+        title = QLabel("运行日志")
+        title.setProperty("role", "cardTitle")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        self.clear_log_btn = create_button("清空", btn_type="text", min_height=24)
+        self.clear_log_btn.setToolTip("清空日志显示")
+        self.clear_log_btn.clicked.connect(self._on_clear_log)
+        title_row.addWidget(self.clear_log_btn)
+        log_v.addLayout(title_row)
+        log_v.addWidget(self.log_text, 1)
+        self.main_tabs.addTab(log_tab, "运行日志")
+
+        # 标签页 2：设置
+        self._settings_panel = SettingsPanel()
+        self.main_tabs.addTab(self._settings_panel, "设置")
+        self._settings_panel.config_saved.connect(self._on_config_saved)
+        self._settings_panel.theme_changed.connect(self._on_theme_changed_external)
+
+        # 标签页 3：任务日历
+        self._calendar_view = CalendarView()
+        self.main_tabs.addTab(self._calendar_view, "任务日历")
+        return self.main_tabs
+
+    def _create_footer(self) -> QHBoxLayout:
+        """底部状态行：退出 + 状态文本 | 关于 + 版本号（设置/日历已是标签页）。"""
+        h = QHBoxLayout()
+        h.setContentsMargins(2, 0, 2, 0)
+        h.setSpacing(4)
+
+        self.exit_btn = create_button("退出", btn_type="text", min_height=24)
+        self.exit_btn.setToolTip("退出程序（关闭窗口仅最小化到托盘）")
         self.exit_btn.clicked.connect(lambda: self._real_close())
         h.addWidget(self.exit_btn)
 
-        h.addStretch()
-
         self.footer_status = QLabel("就绪")
-        self.footer_status.setFont(FontStyle.normal(FontSize.CONTENT_SMALL))
+        self.footer_status.setProperty("role", "muted")
         h.addWidget(self.footer_status)
+        h.addStretch(1)
+
+        self.about_btn = create_button("关于", btn_type="text", min_height=24)
+        self.about_btn.setToolTip("关于 (F1)")
+        self.about_btn.setShortcut("F1")
+        self.about_btn.clicked.connect(self.show_about)
+        h.addWidget(self.about_btn)
 
         version_label = QLabel(f"v{get_project_version()}")
-        version_label.setFont(FontStyle.normal(9))
+        version_label.setProperty("role", "muted")
         h.addWidget(version_label)
+        return h
 
-        return bar
+    def _on_clear_log(self) -> None:
+        """清空日志显示（不影响日志文件）。"""
+        self.log_text.clear()
+        info("main", "用户清空了日志显示")
+
+    # ------------------------------------------------------------------
+    # 状态刷新
+    # ------------------------------------------------------------------
 
     def _update_time_display(self) -> None:
         # 有活跃任务时不覆盖状态栏，避免覆盖任务进度信息
@@ -242,7 +297,39 @@ class MainWindow(QMainWindow):
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
-        self.run_btn.setText("执行" if enabled else "运行中...")
+        self.run_btn.setText("立即执行" if enabled else "运行中...")
+
+    def _update_status_display(self) -> None:
+        today = datetime.date.today()
+        need_work = should_work_today()
+        date_rules = global_config.get("DATE_RULES", {})
+
+        rule_source = "国务院官方节假日"
+        if today in [
+            parse_date_str(d)
+            for d in global_config.get("COMPENSATORY_WORKDAYS", [])
+            if parse_date_str(d)
+        ]:
+            rule_source = "调休上班日"
+        elif date_rules.get("ENABLE_CUSTOM_RULE", False):
+            rule_source = "自定义规则"
+
+        work_status = "今天需要执行任务" if need_work else "今天无需执行"
+        weekday = "一二三四五六日"[today.weekday()]
+
+        self.date_label.setText(f"{today.year}年{today.month}月{today.day}日 · 星期{weekday}")
+        self.status_badge.setText(work_status)
+        self.status_badge.setProperty("state", "work" if need_work else "rest")
+        # 属性变更后刷新样式
+        style = self.status_badge.style()
+        if style is not None:
+            style.unpolish(self.status_badge)
+            style.polish(self.status_badge)
+        self.rule_label.setText(f"执行规则：{rule_source}")
+        self.time_label.setText(
+            f"关机时间：{global_config.get('SHUTDOWN_HOUR', 23):02d}:"
+            f"{global_config.get('SHUTDOWN_MIN', 0):02d}"
+        )
 
     # ------------------------------------------------------------------
     # 任务链
@@ -256,8 +343,13 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1000, self.start_task_chain)
 
     def start_task_chain(self) -> None:
+        # 防重入：旧链仍在执行时忽略重复启动请求（否则旧链信号会在
+        # 已关闭的线程池上触发提交，导致 PyQt5 abort）
+        if self.task_executor is not None and self.task_executor.is_chain_active():
+            info("main", "任务链正在执行，忽略重复启动请求")
+            return
         self._set_buttons_enabled(False)
-        # 清理旧的 executor，避免线程池泄漏
+        # 清理旧的 executor，避免线程池泄漏（shutdown 会断开旧链信号）
         if self.task_executor is not None:
             self.task_executor.cancel_all()
             self.task_executor.shutdown(wait=False)
@@ -297,9 +389,17 @@ class MainWindow(QMainWindow):
     def _on_chain_success(self, success: bool, results: dict[str, Any]) -> None:
         self._set_buttons_enabled(True)
         if success:
-            self.footer_status.setText("所有任务执行完成")
-            info("main", "任务链执行成功")
-            self._tray.notify("校园网自动登录", "所有任务执行完成")
+            # 检查执行条件步骤：今天无需执行时给出不同提示
+            check_result = results.get("检查执行条件")
+            need_work = not isinstance(check_result, dict) or check_result.get("need_work", True)
+            if need_work:
+                self.footer_status.setText("所有任务执行完成")
+                info("main", "任务链执行成功")
+                self._tray.notify("校园网自动登录", "所有任务执行完成")
+            else:
+                self.footer_status.setText("今天无需执行（节假日/周末）")
+                info("main", "任务链提前结束：今天无需执行")
+                self._tray.notify("校园网自动登录", "今天无需执行任务")
         else:
             self.footer_status.setText("部分任务失败")
             info("main", "任务链执行完成，但有任务失败")
@@ -445,47 +545,30 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "错误", f"校园网登录测试失败：{error_msg}")
 
     def on_settings(self) -> None:
-        try:
-            dialog = SettingsDialog(self)
-            if dialog.exec():
-                self._update_status_display()
-        except Exception as e:
-            import traceback
+        """切换到设置标签页（嵌入式设置，不再弹窗）。"""
+        self.main_tabs.setCurrentWidget(self._settings_panel)
 
-            error_msg = f"打开设置对话框失败：{str(e)}\n\n{traceback.format_exc()}"
-            error("main", error_msg)
-            QMessageBox.critical(self, "错误", error_msg)
+    def _on_config_saved(self) -> None:
+        """设置面板保存配置后刷新状态显示与万年历。"""
+        self._update_status_display()
+        self._calendar_view.update_theme()
+        self.footer_status.setText("配置已保存")
+        info("main", "配置已保存")
 
-    def _update_status_display(self) -> None:
-        today = datetime.date.today()
-        need_work = should_work_today()
-        date_rules = global_config.get("DATE_RULES", {})
+    def _on_theme_changed_external(self, theme_name: str) -> None:
+        """设置面板切换主题后刷新万年历视图（全局 QSS 已即时重绘）。"""
+        self._calendar_view.update_theme()
 
-        rule_source = "国务院官方节假日"
-        if today in [
-            parse_date_str(d)
-            for d in global_config.get("COMPENSATORY_WORKDAYS", [])
-            if parse_date_str(d)
-        ]:
-            rule_source = "调休上班日"
-        elif date_rules.get("ENABLE_CUSTOM_RULE", False):
-            rule_source = "自定义规则"
-
-        work_status = "需要联网并关机" if need_work else "不执行任何操作"
-
-        self.date_label.setText(f"日期：{today}（{today.strftime('%A')}）")
-        self.status_label.setText(f"状态：{work_status}")
-        self.rule_label.setText(f"规则：{rule_source}")
-        self.time_label.setText(
-            f"关机：{global_config.get('SHUTDOWN_HOUR', 23):02d}:"
-            f"{global_config.get('SHUTDOWN_MIN', 0):02d}"
-        )
+    # ------------------------------------------------------------------
+    # 对话框
+    # ------------------------------------------------------------------
 
     def show_about(self) -> None:
         AboutDialog(self).exec()
 
     def show_calendar(self) -> None:
-        CalendarDialog(self).exec()
+        """切换到任务日历标签页（嵌入式万年历，不再弹窗）。"""
+        self.main_tabs.setCurrentWidget(self._calendar_view)
 
     # ------------------------------------------------------------------
     # 窗口关闭

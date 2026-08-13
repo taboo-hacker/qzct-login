@@ -1,0 +1,486 @@
+"""
+万年历视图组件
+
+从 CalendarDialog 抽取的可嵌入视图：日历 + 农历详情 + 执行计划图例。
+完整适配亮色/暗色主题（update_theme 重新着色，QCalendarWidget 使用主题调色板）。
+"""
+
+import datetime
+from typing import Any
+
+from lunar_python import Solar
+from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtGui import QColor, QPalette, QTextCharFormat
+from PyQt5.QtWidgets import (
+    QCalendarWidget,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.config import global_config
+from core.date_rules import should_work_today
+from gui.styling.theme_manager import ThemeManager
+from gui.styling.widgets import create_card_widget, create_label
+from infra import debug, error, info, is_date_in_period, parse_date_str, warning
+
+# 星期名称常量（模块级，避免每次调用重新创建）
+WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+
+# _lunar_cache 的最大条目数
+_LUNAR_CACHE_MAX_SIZE = 400
+
+
+class CalendarView(QWidget):
+    """万年历视图：日历组件 + 农历详情 + 执行计划图例。"""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._lunar_cache: dict[datetime.date, dict[str, Any]] = {}
+        self._current_status: str = ""
+
+        # 组件引用
+        self.calendar: QCalendarWidget | None = None
+        self.solar_label: QLabel | None = None
+        self.lunar_date_label: QLabel | None = None
+        self.ganzhi_label: QLabel | None = None
+        self.yi_label: QLabel | None = None
+        self.ji_label: QLabel | None = None
+        self.extra_info_label: QLabel | None = None
+        self.work_status_label: QLabel | None = None
+        self._legend_color_labels: list[QLabel] = []
+
+        self._init_ui()
+        info("main", "万年历视图初始化完成")
+
+    def _init_ui(self) -> None:
+        """初始化 UI"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 日历组件
+        self.calendar = QCalendarWidget()
+        self.calendar.setGridVisible(True)
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        self.calendar.currentPageChanged.connect(self.on_month_changed)
+        self.calendar.setMinimumHeight(240)
+        main_layout.addWidget(self.calendar)
+
+        # 详情区域（滚动，空间不足时可滚动查看）
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("calendarScroll")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self.detail_frame = create_card_widget()
+        self.detail_frame.setObjectName("detailCard")
+        detail_layout = QVBoxLayout(self.detail_frame)
+        detail_layout.setContentsMargins(20, 16, 20, 16)
+        detail_layout.setSpacing(8)
+
+        # 公历日期
+        self.solar_label = create_label("", font_size=11, bold=True)
+        self.solar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        detail_layout.addWidget(self.solar_label)
+
+        # 农历日期
+        self.lunar_date_label = create_label("", font_size=10)
+        self.lunar_date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        detail_layout.addWidget(self.lunar_date_label)
+
+        # 干支
+        self.ganzhi_label = create_label("", font_size=10)
+        self.ganzhi_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        detail_layout.addWidget(self.ganzhi_label)
+
+        # 分隔线
+        detail_layout.addWidget(self._make_separator())
+
+        # 宜
+        self.yi_label = create_label("", font_size=10)
+        self.yi_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.yi_label.setWordWrap(True)
+        detail_layout.addWidget(self.yi_label)
+
+        # 忌
+        self.ji_label = create_label("", font_size=10)
+        self.ji_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.ji_label.setWordWrap(True)
+        detail_layout.addWidget(self.ji_label)
+
+        # 分隔线
+        detail_layout.addWidget(self._make_separator())
+
+        # 额外信息
+        self.extra_info_label = create_label("", font_size=9)
+        self.extra_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.extra_info_label.setWordWrap(True)
+        detail_layout.addWidget(self.extra_info_label)
+
+        # 工作状态
+        self.work_status_label = create_label("", font_size=10, bold=True)
+        self.work_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        detail_layout.addWidget(self.work_status_label)
+
+        scroll_area.setWidget(self.detail_frame)
+        scroll_area.setMaximumHeight(200)
+        main_layout.addWidget(scroll_area)
+
+        # 图例
+        legend_layout = self._create_legend()
+        main_layout.addLayout(legend_layout)
+
+        # 连接事件
+        self.calendar.selectionChanged.connect(self.on_date_selected)
+        self.update_theme()
+        self.mark_execution_dates()
+        self.on_date_selected()
+
+    @staticmethod
+    def _make_separator() -> QFrame:
+        line = QFrame()
+        line.setObjectName("divider")
+        line.setFixedHeight(1)
+        return line
+
+    def update_theme(self) -> None:
+        """按当前主题重新着色（日历调色板 + 详情标签 + 图例 + 日期标记）。"""
+        theme = ThemeManager.current_theme()
+
+        # QCalendarWidget 调色板：深色模式下 QSS 无法覆盖的部分由调色板兜底
+        if self.calendar is not None:
+            palette = QPalette()
+            palette.setColor(QPalette.ColorRole.Window, QColor(theme.card_bg))
+            palette.setColor(QPalette.ColorRole.WindowText, QColor(theme.text_primary))
+            palette.setColor(QPalette.ColorRole.Base, QColor(theme.card_bg))
+            palette.setColor(QPalette.ColorRole.AlternateBase, QColor(theme.hover_bg))
+            palette.setColor(QPalette.ColorRole.Text, QColor(theme.text_primary))
+            palette.setColor(QPalette.ColorRole.Button, QColor(theme.card_bg))
+            palette.setColor(QPalette.ColorRole.ButtonText, QColor(theme.text_primary))
+            palette.setColor(QPalette.ColorRole.Highlight, QColor(theme.primary))
+            palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+            self.calendar.setPalette(palette)
+
+        if self.lunar_date_label is not None:
+            self.lunar_date_label.setStyleSheet(f"color: {theme.danger}; background: transparent;")
+        if self.ganzhi_label is not None:
+            self.ganzhi_label.setStyleSheet(
+                f"color: {theme.text_primary}; background: transparent;"
+            )
+        if self.extra_info_label is not None:
+            self.extra_info_label.setStyleSheet(
+                f"color: {theme.text_secondary}; background: transparent;"
+            )
+        if self.yi_label is not None:
+            self.yi_label.setStyleSheet(
+                f"color: {theme.success}; margin-top: 3px; padding: 5px; "
+                f"background-color: {theme.success_bg}; border-radius: 3px;"
+            )
+        if self.ji_label is not None:
+            self.ji_label.setStyleSheet(
+                f"color: {theme.danger}; margin-top: 3px; padding: 5px; "
+                f"background-color: {theme.danger_bg}; border-radius: 3px;"
+            )
+        self._style_work_status()
+
+        # 图例色块
+        legend_colors = (theme.success, theme.danger, theme.warning)
+        for label, color in zip(self._legend_color_labels, legend_colors, strict=True):
+            label.setStyleSheet(f"background-color: {color}; border-radius: 2px;")
+
+        # 重新标记本月日期
+        self.mark_execution_dates()
+
+    def _create_legend(self) -> QHBoxLayout:
+        """创建图例"""
+        legend_layout = QHBoxLayout()
+        legend_layout.addStretch()
+        legend_layout.addWidget(self._create_legend_item("需要执行任务"))
+        legend_layout.addSpacing(16)
+        legend_layout.addWidget(self._create_legend_item("不执行任务"))
+        legend_layout.addSpacing(16)
+        legend_layout.addWidget(self._create_legend_item("调休上班"))
+        legend_layout.addStretch()
+        return legend_layout
+
+    def _create_legend_item(self, text: str) -> QWidget:
+        """创建单个图例项（色块颜色由 update_theme 统一填充）。"""
+        legend = QWidget()
+        layout = QHBoxLayout(legend)
+
+        color_label = QLabel()
+        color_label.setFixedSize(14, 14)
+        color_label.setStyleSheet("border-radius: 2px;")
+        self._legend_color_labels.append(color_label)
+
+        text_label = create_label(text, font_size=9)
+        layout.addWidget(color_label)
+        layout.addWidget(text_label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        return legend
+
+    def on_month_changed(self, year: int, month: int) -> None:
+        """月份变化时重新标记日期"""
+        debug("main", f"万年历月份切换到：{year}-{month}")
+        self.mark_execution_dates()
+
+    def on_date_selected(self) -> None:
+        """当选择日期变化时更新状态显示"""
+        try:
+            if self.calendar is None:
+                return
+
+            selected_date = self.calendar.selectedDate()
+            date = datetime.date(selected_date.year(), selected_date.month(), selected_date.day())
+
+            weekday_str = WEEKDAY_NAMES[date.weekday()]
+
+            if self.solar_label:
+                self.solar_label.setText(f"{date.year}年{date.month}月{date.day}日 ({weekday_str})")
+
+            should_work, status = self.should_work_on_date(date)
+            self._current_status = status
+
+            if global_config.get("SHOW_LUNAR_CALENDAR", True):
+                lunar_detail = self._get_lunar_detail(date)
+
+                if self.lunar_date_label:
+                    self.lunar_date_label.setText(lunar_detail.get("lunar_date", ""))
+                if self.ganzhi_label:
+                    self.ganzhi_label.setText(lunar_detail.get("ganzhi", ""))
+
+                yi_list = lunar_detail.get("yi", [])
+                ji_list = lunar_detail.get("ji", [])
+
+                if self.yi_label:
+                    self.yi_label.setVisible(bool(yi_list))
+                    if yi_list:
+                        self.yi_label.setText(f"宜：{' '.join(yi_list)}")
+                if self.ji_label:
+                    self.ji_label.setVisible(bool(ji_list))
+                    if ji_list:
+                        self.ji_label.setText(f"忌：{' '.join(ji_list)}")
+
+                extra_parts = []
+                if lunar_detail.get("jieqi"):
+                    extra_parts.append(f"节气：{lunar_detail['jieqi']}")
+                if lunar_detail.get("festivals"):
+                    all_festivals = lunar_detail["festivals"].get("traditional", []) + lunar_detail[
+                        "festivals"
+                    ].get("solar", [])
+                    if all_festivals:
+                        extra_parts.append(f"节日：{'、'.join(all_festivals)}")
+                if lunar_detail.get("other_info"):
+                    extra_parts.append(lunar_detail["other_info"])
+
+                if self.extra_info_label:
+                    if extra_parts:
+                        self.extra_info_label.setText(" | ".join(extra_parts))
+                        self.extra_info_label.setVisible(True)
+                    else:
+                        self.extra_info_label.setVisible(False)
+            else:
+                for label in (
+                    self.lunar_date_label,
+                    self.ganzhi_label,
+                    self.yi_label,
+                    self.ji_label,
+                    self.extra_info_label,
+                ):
+                    if label is not None:
+                        label.setVisible(False)
+
+            if self.work_status_label:
+                self.work_status_label.setText(status)
+                self._style_work_status()
+
+            debug("main", f"万年历日期选中：{date}")
+        except Exception as e:
+            error("main", "日期选择处理出错", exc_info=True)
+            if self.solar_label:
+                self.solar_label.setText(f"日期处理出错：{str(e)}")
+
+    def _style_work_status(self) -> None:
+        """按当前主题与状态设置工作状态标签样式。"""
+        theme = ThemeManager.current_theme()
+        if self.work_status_label is None:
+            return
+
+        status = self._current_status
+        if "不执行" in status:
+            bg, fg = theme.danger_bg, theme.danger
+        elif "调休" in status:
+            bg, fg = theme.warning_bg, theme.warning
+        elif "需要执行" in status:
+            bg, fg = theme.success_bg, theme.success
+        else:
+            bg, fg = theme.primary_bg, theme.primary
+
+        self.work_status_label.setStyleSheet(
+            f"background-color: {bg}; color: {fg}; "
+            f"padding: 6px; border-radius: 4px; margin-top: 4px;"
+        )
+
+    def _get_lunar_detail(self, date: datetime.date) -> dict[str, Any]:
+        """获取完整万年历信息，使用缓存提高性能"""
+        if date in self._lunar_cache:
+            return self._lunar_cache[date]
+
+        try:
+            solar = Solar.fromYmd(date.year, date.month, date.day)
+            lunar = solar.getLunar()
+
+            lunar_month = lunar.getMonthInChinese()
+            lunar_day = lunar.getDayInChinese()
+            lunar_date_str = f"农历 {lunar_month}月{lunar_day}"
+
+            year_ganzhi = lunar.getYearInGanZhi()
+            month_ganzhi = lunar.getMonthInGanZhi()
+            day_ganzhi = lunar.getDayInGanZhi()
+            year_shengxiao = lunar.getYearShengXiao()
+            ganzhi_str = f"{year_ganzhi}年 ({year_shengxiao}年) {month_ganzhi}月 {day_ganzhi}日"
+
+            yi_list = lunar.getDayYi()
+            ji_list = lunar.getDayJi()
+            jieqi = lunar.getJieQi()
+
+            festivals: dict[str, list[str]] = {"traditional": [], "solar": []}
+            lunar_festivals = lunar.getFestivals()
+            if lunar_festivals:
+                festivals["traditional"].extend(lunar_festivals)
+            solar_festivals = solar.getFestivals()
+            if solar_festivals:
+                festivals["solar"].extend(solar_festivals)
+
+            result = {
+                "lunar_date": lunar_date_str,
+                "ganzhi": ganzhi_str,
+                "yi": yi_list,
+                "ji": ji_list,
+                "jieqi": jieqi if jieqi else "",
+                "festivals": festivals,
+                "other_info": f"农历{lunar.getYearInChinese()}年",
+            }
+
+            self._lunar_cache[date] = result
+            # 缓存超过上限时清空，防止内存无限增长
+            if len(self._lunar_cache) > _LUNAR_CACHE_MAX_SIZE:
+                self._lunar_cache.clear()
+                self._lunar_cache[date] = result
+            return result
+        except Exception as e:
+            warning("main", f"农历转换失败：{e}")
+            return {
+                "lunar_date": "（农历转换失败）",
+                "ganzhi": "",
+                "yi": [],
+                "ji": [],
+                "jieqi": "",
+                "festivals": {"traditional": [], "solar": []},
+                "other_info": "",
+            }
+
+    def should_work_on_date(self, date: datetime.date) -> tuple[bool, str]:
+        """判断指定日期是否需要执行任务"""
+        try:
+            result = should_work_today(date)
+            debug(
+                "main",
+                f"检查日期 {date} 是否需要执行任务: {'是' if result else '否'}",
+            )
+
+            status = "不执行任务"
+            if result:
+                status = "需要执行任务"
+
+            compensatory_days = [
+                parse_date_str(d)
+                for d in global_config.get("COMPENSATORY_WORKDAYS", [])
+                if parse_date_str(d)
+            ]
+            if date in compensatory_days:
+                status = "调休上班日 - 需要执行任务"
+            else:
+                base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])
+                for period in base_holiday_periods:
+                    if is_date_in_period(date, period):
+                        if not result:
+                            status = f"节假日({period.get('name')}) - 不执行任务"
+                        break
+
+            date_rules = global_config.get("DATE_RULES", {})
+            if date_rules.get("ENABLE_CUSTOM_RULE", False):
+                custom_work_periods = date_rules.get("CUSTOM_WORKDAY_PERIODS", [])
+                for period in custom_work_periods:
+                    if is_date_in_period(date, period):
+                        status = f"自定义工作日({period.get('name')}) - 需要执行任务"
+                        break
+
+                custom_holiday_periods = date_rules.get("CUSTOM_HOLIDAY_PERIODS", [])
+                for period in custom_holiday_periods:
+                    if is_date_in_period(date, period):
+                        status = f"自定义假期({period.get('name')}) - 不执行任务"
+                        break
+
+            return (result, status)
+        except Exception as e:
+            error(
+                "main",
+                f"判断日期 {date} 是否需要执行任务时出错",
+                exc_info=True,
+            )
+            return (False, f"错误：{str(e)}")
+
+    def mark_execution_dates(self) -> None:
+        """标记日历中需要执行任务的日期（颜色取自当前主题）。"""
+        try:
+            if self.calendar is None:
+                return
+
+            theme = ThemeManager.current_theme()
+            current_qdate = self.calendar.selectedDate()
+            current_year = current_qdate.year()
+            current_month = current_qdate.month()
+
+            first_day = datetime.date(current_year, current_month, 1)
+            if current_month == 12:
+                last_day = datetime.date(current_year, current_month, 31)
+            else:
+                last_day = datetime.date(current_year, current_month + 1, 1) - datetime.timedelta(
+                    days=1
+                )
+
+            work_bg = QColor(theme.success)
+            work_bg.setAlpha(80)
+            rest_bg = QColor(theme.danger)
+            rest_bg.setAlpha(80)
+            fg = QColor(theme.text_primary)
+
+            iter_date = first_day
+            day_count = 0
+            while iter_date <= last_day:
+                try:
+                    should_work, _status = self.should_work_on_date(iter_date)
+                    qt_date = QDate(iter_date.year, iter_date.month, iter_date.day)
+
+                    fmt = QTextCharFormat()
+                    fmt.setBackground(work_bg if should_work else rest_bg)
+                    fmt.setForeground(fg)
+                    self.calendar.setDateTextFormat(qt_date, fmt)
+                    day_count += 1
+                except Exception as e:
+                    warning("main", f"标记日期 {iter_date} 时出错: {e}")
+
+                iter_date += datetime.timedelta(days=1)
+
+            debug(
+                "main", f"完成标记 {current_year}年{current_month}月 的执行日期，共 {day_count} 天"
+            )
+        except Exception as e:
+            error("main", "标记执行日期时出错", exc_info=True)
+            QMessageBox.warning(self, "错误", f"标记日历日期时出错: {str(e)}")

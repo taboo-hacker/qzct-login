@@ -3,7 +3,6 @@
 使用主题系统重构的调休上班日编辑组件
 """
 
-
 from PyQt5.QtCore import QDate
 from PyQt5.QtWidgets import (
     QDateEdit,

@@ -56,8 +56,10 @@ def main() -> None:
     # 全局字体
     app.setFont(QFont("Microsoft YaHei", 9))  # type: ignore[attr-defined]
 
-    # 读取主题偏好（仅用于日志级别配色等最小配色，不渲染 QSS）
-    _ = global_config.get("THEME", "light")
+    # 应用默认浅色主题（全局 QSS）；主窗口加载配置后会切换为保存的主题
+    from gui.styling.theme_manager import ThemeManager
+
+    ThemeManager.set_theme(str(global_config.get("THEME", "light")))
 
     from gui.main_window import MainWindow
 

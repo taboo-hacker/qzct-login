@@ -37,6 +37,21 @@ class ThemeColors:
     text_secondary: str = "#666666"
     text_tertiary: str = "#999999"
 
+    # ---- 界面配色（全局 QSS 使用，qss.build_qss 消费） ----
+    window_bg: str = "#F5F6F8"
+    card_bg: str = "#FFFFFF"
+    card_border: str = "#E4E7EC"
+    input_bg: str = "#FFFFFF"
+    input_border: str = "#D1D5DB"
+    hover_bg: str = "#F0F1F3"
+    log_view_bg: str = "#FBFCFD"
+    primary_hover: str = "#2357C4"
+    primary_pressed: str = "#1C47A3"
+    primary_disabled: str = "#A8C1F2"
+    success_hover: str = "#0E6A0E"
+    danger_hover: str = "#A10F1C"
+    warning_hover: str = "#A8430D"
+
 
 def create_light_theme() -> ThemeColors:
     return ThemeColors(name="light")
@@ -62,6 +77,19 @@ def create_dark_theme() -> ThemeColors:
         text_primary="#E0E0E0",
         text_secondary="#A0A0A0",
         text_tertiary="#707070",
+        window_bg="#1F1F1F",
+        card_bg="#2A2A2A",
+        card_border="#3E3E3E",
+        input_bg="#262626",
+        input_border="#4A4A4A",
+        hover_bg="#383838",
+        log_view_bg="#222222",
+        primary_hover="#3395DD",
+        primary_pressed="#2A7DC2",
+        primary_disabled="#3E5F7E",
+        success_hover="#4FB14F",
+        danger_hover="#D05050",
+        warning_hover="#D08030",
     )
 
 

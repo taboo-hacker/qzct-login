@@ -1,8 +1,11 @@
 """
 组件工厂和工具函数
-基于 Fusion 原生风格，不注入自定义 QSS。
+
+按钮/卡片等组件通过动态属性与 objectName 接入全局 QSS 样式表
+（见 gui/styling/qss.py），具体视觉由主题统一控制。
 """
 
+import html
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QCursor, QFont
@@ -23,6 +26,9 @@ def create_button(
     btn = QPushButton(f"{icon} {text}" if icon else text)
     btn.setFont(FontStyle.normal(font_size or FontSize.BUTTON_PRIMARY))
     btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    # 动态属性接入全局 QSS（primary/success/danger/warning/gray/
+    # outline/outline_danger/text 均有对应样式，见 qss.build_qss）
+    btn.setProperty("btnType", btn_type)
 
     if min_width:
         btn.setMinimumWidth(min_width)
@@ -62,8 +68,10 @@ def create_section_title(title: str, icon: str | None = None) -> QLabel:
 
 
 def create_card_widget() -> QFrame:
+    """创建卡片容器（objectName=card，由全局 QSS 绘制边框圆角）。"""
     frame = QFrame()
-    frame.setFrameShape(QFrame.Shape.StyledPanel)
+    frame.setObjectName("card")
+    frame.setFrameShape(QFrame.Shape.NoFrame)
     return frame
 
 
@@ -77,16 +85,17 @@ def create_tip_label(text: str) -> QLabel:
 
 
 class LogTextEdit(QTextEdit):
-    """支持彩色日志输出的文本编辑组件"""
+    """支持彩色日志输出的文本编辑组件（objectName=logView 接入全局 QSS）"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("logView")
         self.setReadOnly(True)
         self.setFont(QFont("Consolas", 10))
         self._update_colors()
 
     def _update_colors(self) -> None:
-        """配色由 ThemeManager 管理，不注入 QSS"""
+        """配色由全局 QSS 管理，无需组件内处理"""
         pass
 
     def update_theme(self) -> None:
@@ -106,8 +115,10 @@ class LogTextEdit(QTextEdit):
         cursor = self.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
 
-        html = f'<span style="color: {color};">{text}</span>'
-        cursor.insertHtml(html + "<br>")
+        # 转义日志文本，防止 <、& 等字符破坏 HTML 结构或注入标签
+        escaped = html.escape(text)
+        snippet = f'<span style="color: {color};">{escaped}</span>'
+        cursor.insertHtml(snippet + "<br>")
 
         self.setTextCursor(cursor)
         self.ensureCursorVisible()

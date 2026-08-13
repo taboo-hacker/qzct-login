@@ -197,3 +197,50 @@ class TestThemeManagerExtended:
         widget = QLabel()
         ThemeManager.apply_to_widget(widget)
         # 不崩溃即可
+
+
+class TestBuildQss:
+    """全局 QSS 生成测试"""
+
+    def test_build_qss_contains_theme_colors(self):
+        from gui.styling.qss import build_qss
+
+        theme = create_light_theme()
+        qss = build_qss(theme)
+        assert theme.primary in qss
+        assert theme.window_bg in qss
+        assert theme.card_bg in qss
+        assert theme.card_border in qss
+
+    def test_build_qss_light_and_dark_differ(self):
+        from gui.styling.qss import build_qss
+        from gui.styling.themes import create_dark_theme
+
+        light_qss = build_qss(create_light_theme())
+        dark_qss = build_qss(create_dark_theme())
+        assert light_qss != dark_qss
+
+
+class TestButtonQssIntegration:
+    """按钮/卡片与全局 QSS 的衔接测试"""
+
+    def test_button_sets_btn_type_property(self):
+        _ensure_qapp()
+        btn = create_button("Test", btn_type="primary")
+        assert btn.property("btnType") == "primary"
+        btn2 = create_button("Test", btn_type="outline_danger")
+        assert btn2.property("btnType") == "outline_danger"
+
+    def test_card_has_card_object_name(self):
+        _ensure_qapp()
+        card = create_card_widget()
+        assert card.objectName() == "card"
+
+    def test_log_append_escapes_html(self, qtbot):
+        _ensure_qapp()
+        edit = LogTextEdit()
+        qtbot.addWidget(edit)
+        edit.append_colored("<b>bold</b> & <i>x</i>", "INFO")
+        # 原文以转义形式进入 HTML 源码，而不是被解释为标签
+        assert "&lt;b&gt;" in edit.toHtml()
+        assert "<b>bold</b> & <i>x</i>" in edit.toPlainText()
