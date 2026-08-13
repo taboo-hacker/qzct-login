@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.5.0](https://img.shields.io/badge/Version-1.5.0-blue.svg)](pyproject.toml)
+[![Version: 1.5.1](https://img.shields.io/badge/Version-1.5.1-blue.svg)](pyproject.toml)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -121,7 +121,7 @@ qzct-login/
 ├── utils/
 │   ├── version.py              # 版本管理
 │   └── logger.py               # 日志工具（Loguru 配置）
-├── tests/                      # 测试模块（290 个测试用例）
+├── tests/                      # 测试模块（296 个测试用例）
 ├── .github/
 │   └── workflows/              # GitHub Actions (CI + Release)
 ├── pyproject.toml              # 项目配置
@@ -136,6 +136,16 @@ qzct-login/
 - [代码 Wiki](CODE_WIKI.md) - 项目架构和 API 文档
 
 ## 🔄 更新日志
+
+### v1.5.1 (2026-08-13)
+
+- 🔧 修复：设置面板在配置加载前构建，导致显示默认空值、保存时覆盖已保存的配置（调整初始化顺序）
+- 🔧 修复：ISP_SUFFIX 旧字段迁移从未生效（迁移条件恒为假，迁移基于配置文件实际字段判断）
+- 🔧 修复：自定义日期规则启用后，硬编码调休上班日仍强制判为上班（自定义规则改为最高优先级）
+- 🧹 清理：删除从未发射的 progress/all_finished 信号、5 个零引用异常类、进度与取消死标志等死代码
+- 🛡️ CI 门禁：覆盖率阈值 70%（--cov-fail-under）；black 纳入 tests 目录，与 isort 口径统一
+- 📝 文档：CODE_WIKI、DEVELOPING 按 v1.5.0 实际代码重写（PySide6、新结构、真实 API）
+- 🧪 测试用例扩充至 296 个（295 通过 + 1 跳过），新增配置迁移与日期规则优先级回归用例
 
 ### v1.5.0 (2026-08-13)
 

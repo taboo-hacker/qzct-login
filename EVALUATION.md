@@ -114,13 +114,13 @@
 8. HTTP 明文风险处置 + WiFi profile protected 尝试（M1/M2）—— 仍待处理
 9. ~~密钥缺失静默重建~~ 随加密体系移除
 
-### P2 · 工程质量轮（约 2-3 天）
-10. 死代码清理（all_finished/progress、6 个异常类）（M9）
-11. 覆盖率门禁 + Codecov + black/isort 统一 tests（M14）
-12. 测试补盲区：load_config、加密迁移（M15）—— MainWindow 冒烟测试已补（tests/test_main_window.py）
+### P2 · 工程质量轮（✅ 已完成，2026-08-13，v1.5.1）
+10. ✅ 死代码清理：progress/all_finished 信号、5 个零引用异常类、进度/取消死标志、设置面板死属性
+11. ✅ 覆盖率门禁 --cov-fail-under=70（当前 75.66%）；black 纳入 tests 与 isort 统一；Codecov 因 git 服务不在 GitHub 跳过
+12. ✅ 测试补盲区：load_config 迁移分支（ENC:/ISP_SUFFIX/DATE_RULES 旧字段、损坏回退、密钥清理）—— 顺带修复 ISP_SUFFIX 迁移条件恒为假的隐藏 bug
 13. ✅ 主题系统真实重绘（M10）—— 已随 UI 重构轮完成
-14. date_rules 优先级修复（M6）+ 自定义规则测试
-15. CODE_WIKI/DEVELOPING 按 v1.4.0 重写（M13）
+14. ✅ date_rules 优先级修复（M6）：自定义规则升至最高优先级，硬编码调休不再覆盖用户意图；新增 2 个回归测试
+15. ✅ CODE_WIKI/DEVELOPING 按 v1.5.0 实际代码整体重写
 
 ### P0.7 · 框架升级轮（✅ 已完成，2026-08-13，v1.5.0）
 - **PyQt5 → PySide6 6.11**：官方 Qt for Python，LGPL 许可（分发更自由，消除 GPL 合规压力）；项目许可保持不变（CC BY-NC-SA，LGPL 仅约束库本身）
