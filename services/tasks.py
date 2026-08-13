@@ -9,7 +9,7 @@ from typing import Any
 
 from core.config import get_config_snapshot
 from core.date_rules import should_work_today
-from infra.concurrency import TaskContext, task
+from infra.concurrency import CHAIN_BREAK_KEY, TaskContext, task
 from services.campus_login import campus_login
 from services.shutdown import set_shutdown_timer
 from services.wifi import auto_connect_wifi
@@ -27,7 +27,8 @@ def task_check_condition(
 
     if not need_work:
         ctx.log("今天无需执行任务（节假日或周末）")
-        return {"need_work": False, "date": today}
+        # 提前成功终止任务链：跳过 WiFi 连接、校园网登录、定时关机
+        return {"need_work": False, "date": today, CHAIN_BREAK_KEY: True}
 
     ctx.log("今天需要执行任务，开始执行流程")
     return {"need_work": True, "date": today}
@@ -38,7 +39,9 @@ def task_connect_wifi(ctx: TaskContext) -> dict[str, Any]:
     ctx.log("开始连接WiFi网络")
     ctx.set_progress(10)
 
-    wifi_connected = auto_connect_wifi()
+    # 传入取消检查回调：任务超时/取消时，重试循环与退避睡眠可协作式退出
+    cfg = get_config_snapshot()
+    wifi_connected = auto_connect_wifi(cfg, should_cancel=ctx.is_cancelled)
     if wifi_connected:
         ctx.log("WiFi网络连接成功")
         ctx.set_progress(100)

@@ -264,3 +264,42 @@ class TestAutoConnectWifi:
         assert len(sleep_calls) == 2
         assert sleep_calls[0] == 2
         assert sleep_calls[1] == 4
+
+    def test_cancelled_before_first_attempt(self):
+        """取消标志置位时立即返回 False，不发起任何连接（回归 C4）"""
+        cfg = {
+            "WIFI_NAME": "MyWiFi",
+            "WIFI_PASSWORD": "pass",
+            "MAX_WIFI_RETRY": 3,
+            "RETRY_INTERVAL": 1,
+        }
+        with (
+            patch("services.wifi.is_wifi_connected", return_value=False) as mock_conn,
+            patch("services.wifi.connect_wifi") as mock_connect,
+        ):
+            assert auto_connect_wifi(cfg, should_cancel=lambda: True) is False
+            mock_conn.assert_not_called()
+            mock_connect.assert_not_called()
+
+    def test_cancelled_during_backoff_sleep(self):
+        """退避睡眠期间取消时提前退出（回归 C4）"""
+        cfg = {
+            "WIFI_NAME": "MyWiFi",
+            "WIFI_PASSWORD": "pass",
+            "MAX_WIFI_RETRY": 5,
+            "RETRY_INTERVAL": 1,
+        }
+        cancel_flag = {"cancelled": False}
+        with (
+            patch("services.wifi.is_wifi_connected", return_value=False),
+            patch("services.wifi.connect_wifi", return_value=False),
+            patch("services.wifi.time.sleep") as mock_sleep,
+        ):
+
+            def fake_sleep(seconds):
+                # 第一次睡眠时模拟外部取消
+                cancel_flag["cancelled"] = True
+
+            mock_sleep.side_effect = fake_sleep
+            result = auto_connect_wifi(cfg, should_cancel=lambda: cancel_flag["cancelled"])
+            assert result is False

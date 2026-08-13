@@ -31,7 +31,9 @@ def get_project_version() -> str:
 
     try:
         if getattr(sys, "frozen", False):
-            base_dir = os.path.dirname(sys.executable)
+            # PyInstaller onefile 将 datas 资源解压到 _MEIPASS 临时目录；
+            # 未提供时退回到 exe 所在目录（onedir 场景）
+            base_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
         else:
             base_dir = os.path.dirname(os.path.abspath(__file__))
 

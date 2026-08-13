@@ -26,9 +26,6 @@ hiddenimports = [
     "chinese_calendar",
     # loguru 内部模块
     "loguru",
-    # cryptography 后端
-    "cryptography",
-    "cryptography.fernet",
     # tomllib/tomli 回退
     "tomllib",
     "tomli",
@@ -46,6 +43,9 @@ datas = []
 # 收集 chinese_calendar 和 lunar_python 的数据文件
 datas += collect_data_files("chinese_calendar")
 datas += collect_data_files("lunar_python")
+
+# 打包 pyproject.toml：utils/version.py 在 frozen 模式下从 _MEIPASS 读取版本号
+datas += [("pyproject.toml", ".")]
 
 # ------------------------------------------------------------------
 # 二进制依赖

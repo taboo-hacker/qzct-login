@@ -10,6 +10,9 @@ from typing import Any, Optional
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
+# 任务链步骤结果字典中的提前终止标记：值为真时链以"成功"结束并跳过剩余步骤
+CHAIN_BREAK_KEY = "chain_break"
+
 
 class TaskContext:
     def __init__(self, task_name: str):
@@ -118,6 +121,9 @@ class TaskExecutor(QObject):
                     try:
                         result = inner_future.result(timeout=timeout_val)
                     except FutureTimeoutError:
+                        # 协作式取消：先置取消标志（长循环任务会自行退出），
+                        # 再尝试取消 future（对已运行线程无效，但可拦截排队任务）
+                        ctx.cancel()
                         inner_future.cancel()
                         raise TimeoutError(f"任务 {task_name} 超时 ({timeout_val}s)") from None
                 else:
@@ -138,7 +144,11 @@ class TaskExecutor(QObject):
         return future
 
     def cancel_all(self) -> None:
-        """取消所有已提交的任务。"""
+        """取消所有已提交的任务。
+
+        运行中任务通过 TaskContext 的取消标志协作式停止（任务函数需检查
+        ctx.is_cancelled()）；未启动的 future 直接取消。
+        """
         self._cancelled = True
         with self._lock:
             contexts = list(self._contexts.values())
@@ -148,8 +158,21 @@ class TaskExecutor(QObject):
         for future in tasks:
             future.cancel()
 
+    def is_chain_active(self) -> bool:
+        """当前是否有任务链在执行。"""
+        with self._lock:
+            return self._chain_active
+
     def shutdown(self, wait: bool = True) -> None:
-        """关闭线程池。"""
+        """关闭线程池。
+
+        同时中止未完成的任务链并断开其信号连接：避免关闭后运行中任务
+        完成时信号触发 _execute_chain_next 在已关闭线程池上 submit，
+        抛出 RuntimeError 导致 PyQt5 abort。
+        """
+        with self._lock:
+            self._chain_active = False
+        self._disconnect_chain_signals()
         self._executor.shutdown(wait=wait)
 
     # ------------------------------------------------------------------
@@ -195,30 +218,48 @@ class TaskExecutor(QObject):
     def _execute_chain_next(self) -> None:
         """执行任务链中的下一个任务。"""
         if self._chain_index >= len(self._chain_steps):
-            with self._lock:
-                self._chain_active = False
-            self._disconnect_chain_signals()
-            if self._chain_on_complete:
-                self._chain_on_complete(True, self._chain_results)
+            self._finish_chain(True)
             return
 
         step = self._chain_steps[self._chain_index]
-        self.submit(step["func"], step["name"], *step["args"], **step["kwargs"])
+        try:
+            self.submit(step["func"], step["name"], *step["args"], **step["kwargs"])
+        except RuntimeError:
+            # 线程池已被关闭（如主窗口退出/链被中止）：按失败终止链，
+            # 不能让异常逃逸出 Qt 槽（PyQt5 会直接 abort 进程）
+            self._chain_results[step["name"]] = {"error": "线程池已关闭，无法提交任务"}
+            self._finish_chain(False)
+
+    def _finish_chain(self, success: bool) -> None:
+        """终止任务链：置未激活、断开信号、触发完成回调（幂等）。
+
+        所有链结束路径（正常完成/提前终止/错误/关闭）统一走此方法，
+        保证信号断开与回调只发生一次。
+        """
+        with self._lock:
+            if not self._chain_active:
+                return
+            self._chain_active = False
+            results = dict(self._chain_results)
+        self._disconnect_chain_signals()
+        if self._chain_on_complete:
+            self._chain_on_complete(success, results)
 
     def _on_chain_task_finished(self, task_name: str, result: object) -> None:
         """任务链中单个任务完成的槽函数。"""
         self._chain_results[task_name] = result
+        # 步骤可通过返回 {CHAIN_BREAK_KEY: True} 提前成功终止链
+        # （如"今天无需执行"，跳过 WiFi/登录/关机等剩余步骤）
+        if isinstance(result, dict) and result.get(CHAIN_BREAK_KEY):
+            self._finish_chain(True)
+            return
         self._chain_index += 1
         self._execute_chain_next()
 
     def _on_chain_task_error(self, task_name: str, error_msg: str) -> None:
         """任务链中单个任务失败的槽函数。"""
         self._chain_results[task_name] = {"error": error_msg}
-        with self._lock:
-            self._chain_active = False
-        self._disconnect_chain_signals()
-        if self._chain_on_complete:
-            self._chain_on_complete(False, self._chain_results)
+        self._finish_chain(False)
 
 
 _task_registry: dict[str, Callable[..., Any]] = {}

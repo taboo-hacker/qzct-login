@@ -3,13 +3,21 @@ GUI 日志 Sink
 
 将 Loguru 日志安全转发到 PyQt GUI 组件。
 从 utils/logger.py 中拆出，使 utils/ 层不再在模块加载时耦合 PyQt5。
+
+跨线程投递机制：
+    loguru 的 sink.write() 在调用线程（可能是 TaskExecutor 工作线程）执行，
+    直接操作 widget 违反 Qt 线程规则。旧实现用 QTimer.singleShot(0, callable)
+    从工作线程投递，但该回调需要调用线程存在事件循环，工作线程没有事件循环，
+    导致服务层日志在 GUI 中全部静默丢失。
+    现改用 pyqtSignal 投递：槽函数绑定在 sink 所属线程（主线程），
+    Qt 对跨线程 emit 自动使用 QueuedConnection，消息可靠送达。
 """
 
 import contextlib
 import threading
 from typing import Any, Optional
 
-from PyQt5.QtCore import QObject, QTimer
+from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtWidgets import QWidget
 
 
@@ -23,12 +31,16 @@ class QtLogSink(QObject):
 
     _instance: Optional["QtLogSink"] = None
     _pending_logs: list[str] = []
-    _lock = threading.Lock()
+    _pending_lock = threading.Lock()
+
+    # 跨线程日志消息通道（emit 可发生在任意线程，槽在主线程执行）
+    _log_message = pyqtSignal(str)
 
     def __init__(self, gui_widget: QWidget | None = None) -> None:
         super().__init__()
         self._gui_widget: QWidget | None = None
         self._destroyed_conn: Any = None
+        self._log_message.connect(self._on_log_message)
         if gui_widget is not None:
             self.set_widget(gui_widget)
 
@@ -61,16 +73,21 @@ class QtLogSink(QObject):
         cls.flush_pending_logs()
 
     def write(self, message: str) -> None:
+        """loguru sink 入口，可在任意线程调用。"""
         if self._gui_widget is not None:
-            # 捕获引用，避免 lambda 执行时 widget 已被销毁
-            widget = self._gui_widget
-            QTimer.singleShot(0, lambda: self._safe_append_to_gui(widget, message))
+            # 跨线程 emit：Qt 自动转为 QueuedConnection 投递到主线程
+            self._log_message.emit(message)
         else:
-            # 无 GUI widget 时缓冲日志
-            with QtLogSink._lock:
+            # 无 GUI widget 时缓冲日志（保留最近日志，超出上限丢弃最旧的）
+            with QtLogSink._pending_lock:
                 QtLogSink._pending_logs.append(message)
-                if len(QtLogSink._pending_logs) >= 50:
-                    QtLogSink._pending_logs.clear()
+                if len(QtLogSink._pending_logs) > 500:
+                    del QtLogSink._pending_logs[:100]
+
+    def _on_log_message(self, message: str) -> None:
+        """日志消息槽（在 sink 所属线程执行）。"""
+        if self._gui_widget is not None:
+            self._safe_append_to_gui(self._gui_widget, message)
 
     def _safe_append_to_gui(self, widget: QWidget, message: str) -> None:
         """安全地向 GUI 追加日志，widget 已销毁时静默丢弃。"""
@@ -84,21 +101,15 @@ class QtLogSink(QObject):
             # widget 的 C++ 对象已被销毁
             self._gui_widget = None
 
-    def _append_to_gui(self, message: str) -> None:
-        if self._gui_widget is not None:
-            self._safe_append_to_gui(self._gui_widget, message)
-
     @classmethod
     def _flush_pending_logs(cls) -> None:
-        with cls._lock:
+        with cls._pending_lock:
             if not cls._pending_logs:
                 return
             combined = "".join(cls._pending_logs)
             cls._pending_logs.clear()
         if cls._instance is not None and cls._instance._gui_widget is not None:
-            instance = cls._instance
-            widget: QWidget = cls._instance._gui_widget
-            QTimer.singleShot(0, lambda: instance._safe_append_to_gui(widget, combined))
+            cls._instance._log_message.emit(combined)
 
     @classmethod
     def flush_pending_logs(cls) -> None:

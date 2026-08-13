@@ -51,9 +51,7 @@ class TestGetProjectVersion:
         version_mod._cached_project_version = None
 
         # 模拟在一个没有 pyproject.toml 的目录
-        with (
-            patch.object(version_mod.os.path, "exists", return_value=False),
-        ):
+        with (patch.object(version_mod.os.path, "exists", return_value=False),):
             result = version_mod.get_project_version()
             assert result == "1.0.0"
 
@@ -75,6 +73,32 @@ class TestGetProjectVersion:
         finally:
             sys.frozen = original_frozen
             sys.executable = original_executable
+
+    def test_frozen_app_reads_meipass_pyproject(self, tmp_path):
+        """frozen onefile 模式从 _MEIPASS 读取打包的 pyproject.toml（回归 M7）"""
+        import utils.version as version_mod
+
+        version_mod._cached_project_version = None
+
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "x"\nversion = "4.5.6"\n', encoding="utf-8")
+
+        original_frozen = getattr(sys, "frozen", False)
+        original_meipass = getattr(sys, "_MEIPASS", None)
+        original_executable = sys.executable
+        try:
+            sys.frozen = True
+            sys._MEIPASS = str(tmp_path)
+            sys.executable = "/fake/path/app.exe"
+            result = version_mod.get_project_version()
+            assert result == "4.5.6"
+        finally:
+            sys.frozen = original_frozen
+            sys.executable = original_executable
+            if original_meipass is None:
+                del sys._MEIPASS
+            else:
+                sys._MEIPASS = original_meipass
 
     def test_exception_returns_default(self):
         """发生异常时返回默认版本"""

@@ -10,6 +10,7 @@ import time
 from PyQt5.QtWidgets import QApplication
 
 from infra.concurrency import (
+    CHAIN_BREAK_KEY,
     TaskChain,
     TaskContext,
     TaskExecutor,
@@ -363,3 +364,78 @@ class TestTaskChainExecute:
         assert result is None
         assert captured["success"] is True
         assert captured["results"] == {}
+
+    def test_chain_execute_breaks_on_chain_break(self, qtbot):
+        """步骤返回 chain_break 时提前成功终止，跳过剩余步骤（回归 C2）"""
+        _ensure_qapp()
+
+        executed = []
+
+        @task("条件检查")
+        def step1(ctx: TaskContext) -> dict:
+            executed.append("条件检查")
+            return {"need_work": False, CHAIN_BREAK_KEY: True}
+
+        @task("不应执行")
+        def step2(ctx: TaskContext) -> dict:
+            executed.append("不应执行")
+            return {"step": 2}
+
+        done = threading.Event()
+        captured = {}
+
+        def on_success(success, results):
+            captured["success"] = success
+            captured["results"] = results
+            done.set()
+
+        chain = TaskChain().add(step1, "条件检查").add(step2, "不应执行").on_success(on_success)
+
+        executor = chain.execute()
+        try:
+            timeout = 10.0
+            elapsed = 0.0
+            while not done.is_set() and elapsed < timeout:
+                QApplication.processEvents()
+                time.sleep(0.05)
+                elapsed += 0.05
+
+            assert done.is_set(), "on_success 回调未在超时内触发"
+            assert captured["success"] is True
+            assert executed == ["条件检查"]
+            assert "条件检查" in captured["results"]
+            assert "不应执行" not in captured["results"]
+        finally:
+            executor.shutdown(wait=False)
+
+    def test_chain_shutdown_during_execution_no_crash(self, qtbot):
+        """链执行中 shutdown 后运行中任务完成不再触发提交（回归 C5）"""
+        _ensure_qapp()
+
+        started = threading.Event()
+
+        @task("慢步骤")
+        def slow_step(ctx: TaskContext) -> dict:
+            started.set()
+            time.sleep(0.3)
+            return {"ok": True}
+
+        @task("后续步骤")
+        def follow(ctx: TaskContext) -> dict:
+            return {"step": 2}
+
+        done = threading.Event()
+
+        def on_complete(success, results):
+            done.set()
+
+        chain = TaskChain().add(slow_step, "慢步骤").add(follow, "后续步骤").on_success(on_complete)
+        executor = chain.execute()
+        assert started.wait(timeout=5)
+        # 运行中直接关闭：断开链信号，任务完成信号不得再触发链推进
+        executor.shutdown(wait=False)
+        for _ in range(20):
+            QApplication.processEvents()
+            time.sleep(0.05)
+        # 未崩溃即通过；完成回调不应触发（链信号已断开）
+        assert not done.is_set()

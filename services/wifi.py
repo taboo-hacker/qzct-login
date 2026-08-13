@@ -9,12 +9,39 @@ import subprocess
 import tempfile
 import time
 import xml.sax.saxutils
+from collections.abc import Callable
 from typing import Any
 
 from core.config import get_config_snapshot
 from core.constants import CONFIG_DIR
 from core.exceptions import WiFiConnectionError, WiFiProfileError
 from infra.logging import error, info
+
+# 取消检查回调：返回 True 表示任务已被取消。用于长循环/睡眠中的协作式取消。
+CancelCheck = Callable[[], bool] | None
+
+
+def _interruptible_sleep(seconds: float, should_cancel: CancelCheck = None) -> bool:
+    """可中断的睡眠：分片 sleep 并轮询取消标志。
+
+    Args:
+        seconds: 总睡眠时长（秒）
+        should_cancel: 取消检查回调，None 表示不可取消
+
+    Returns:
+        bool: True 表示正常睡完，False 表示期间被取消
+    """
+    if should_cancel is None:
+        time.sleep(seconds)
+        return True
+    remaining = seconds
+    while remaining > 0:
+        if should_cancel():
+            return False
+        step = min(0.5, remaining)
+        time.sleep(step)
+        remaining -= step
+    return True
 
 
 def is_wifi_connected(wifi_name: str) -> bool:
@@ -122,7 +149,7 @@ def _wifi_profile_exists(wifi_name: str) -> bool:
         return False
 
 
-def _do_connect_wifi(wifi_name: str, password: str) -> None:
+def _do_connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck = None) -> None:
     """实际执行 WiFi 连接，失败时 raise WiFiError 子类。
 
     分离的内部函数：相比 ``return False``，结构化异常能告诉调用方
@@ -175,13 +202,14 @@ def _do_connect_wifi(wifi_name: str, password: str) -> None:
         info("services.wifi", f"netsh connect 返回非零退出码（可忽略）：{e.returncode}")
 
     info("services.wifi", "等待WiFi连接稳定...")
-    time.sleep(5)
+    if not _interruptible_sleep(5, should_cancel):
+        raise WiFiConnectionError(f"WiFi 连接已取消：{wifi_name}")
 
     if not is_wifi_connected(wifi_name):
         raise WiFiConnectionError(f"WiFi 已发起连接但未稳定连上：{wifi_name}")
 
 
-def connect_wifi(wifi_name: str, password: str) -> bool:
+def connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck = None) -> bool:
     """
     连接到指定的WiFi网络（向后兼容包装：捕获异常并返回 bool）
 
@@ -191,12 +219,13 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
     Args:
         wifi_name (str): WiFi网络名称
         password (str): WiFi密码
+        should_cancel: 取消检查回调，None 表示不可取消
 
     Returns:
         bool: True表示连接成功（或已连接），False表示连接失败
     """
     try:
-        _do_connect_wifi(wifi_name, password)
+        _do_connect_wifi(wifi_name, password, should_cancel)
         info("services.wifi", f"WiFi连接成功：{wifi_name}")
         return True
     except WiFiProfileError as e:
@@ -210,15 +239,17 @@ def connect_wifi(wifi_name: str, password: str) -> bool:
         return False
 
 
-def auto_connect_wifi(cfg: dict[str, Any] | None = None) -> bool:
+def auto_connect_wifi(cfg: dict[str, Any] | None = None, should_cancel: CancelCheck = None) -> bool:
     """
     自动连接WiFi（使用全局配置）
 
     从全局配置读取WiFi信息，尝试自动连接。
     包含重试逻辑，直到连接成功或达到最大重试次数。
+    重试间隔采用指数退避，退避睡眠可被 should_cancel 中断（协作式取消）。
 
     Args:
         cfg (dict, optional): 配置字典快照，默认使用 get_config_snapshot()
+        should_cancel: 取消检查回调，None 表示不可取消
 
     Returns:
         bool: True表示连接成功，False表示连接失败
@@ -237,6 +268,10 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None) -> bool:
 
     retry_count = 0
     while retry_count < max_retry:
+        if should_cancel is not None and should_cancel():
+            info("services.wifi", "WiFi 自动连接已取消", exc_info=False)
+            return False
+
         if is_wifi_connected(wifi_name):
             info("services.wifi", f"WiFi已连接：{wifi_name}")
             return True
@@ -244,7 +279,7 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None) -> bool:
         retry_count += 1
         info("services.wifi", f"第{retry_count}次尝试连接WiFi：{wifi_name}")
 
-        if connect_wifi(wifi_name, wifi_password):
+        if connect_wifi(wifi_name, wifi_password, should_cancel):
             info("services.wifi", f"WiFi连接成功：{wifi_name}")
             return True
 
@@ -252,7 +287,9 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None) -> bool:
             # 指数退避：1s → 2s → 4s → 8s → ... 上限 60s
             delay = min(retry_interval * (2 ** (retry_count - 1)), 60)
             info("services.wifi", f"等待{delay}秒后重试...")
-            time.sleep(delay)
+            if not _interruptible_sleep(delay, should_cancel):
+                info("services.wifi", "WiFi 自动连接已取消", exc_info=False)
+                return False
 
     error("services.wifi", f"超过{max_retry}次重试，WiFi连接失败", exc_info=False)
     return False
