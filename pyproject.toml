@@ -1,6 +1,6 @@
 [project]
 name = "qzct-login"
-version = "1.4.0"
+version = "1.4.1"
 description = "校园网自动登录 + 定时关机工具"
 readme = "README.md"
 license = {text = "LICENSE"}
@@ -26,7 +26,6 @@ classifiers = [
 dependencies = [
     "PyQt5>=5.15.0,<6.0.0",
     "requests>=2.25.0,<3.0.0",
-    "cryptography>=41.0.0,<50.0.0",
     "lunar-python>=1.0.0,<2.0.0",
     "chinesecalendar>=1.0.0,<2.0.0",
     "tomli>=2.0.0; python_version < '3.11'",
@@ -77,7 +76,7 @@ exclude = '''
     | \.hg
     | \.mypy_cache
     | \.tox
-    | \.venv
+    | \.venv(-test)?
     | _build
     | buck-out
     | build
@@ -93,7 +92,7 @@ exclude = '''
 profile = "black"
 line_length = 100
 known_first_party = ["core", "infra", "services", "gui", "utils"]
-known_third_party = ["PyQt5", "requests", "cryptography", "lunar_python", "loguru"]
+known_third_party = ["PyQt5", "requests", "lunar_python", "loguru"]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 skip_gitignore = true
 
@@ -151,7 +150,6 @@ ignore_missing_imports = true
 module = [
     "PyQt5.*",
     "lunar_python.*",
-    "cryptography.*",
 ]
 ignore_missing_imports = true
 
@@ -161,6 +159,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# 环境若同时安装 PyQt5 与 PyQt6，pytest-qt 会优先检测 PyQt6，
+# 与项目代码的 PyQt5 冲突导致跨线程信号失效；强制使用 PyQt5。
+qt_api = "pyqt5"
 addopts = [
     "-v",
     "--tb=short",

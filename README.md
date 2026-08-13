@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.4.0](https://img.shields.io/badge/Version-1.4.0-blue.svg)](pyproject.toml)
+[![Version: 1.4.1](https://img.shields.io/badge/Version-1.4.1-blue.svg)](pyproject.toml)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -25,9 +25,9 @@ QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的
 - ✅ 定时关机 — 灵活设置关机时间
 - ✅ 智能日期规则 — 支持国务院官方节假日、调休、自定义规则
 - ✅ 农历日历 — 内置农历显示
-- ✅ 安全加密存储 — 密码本地加密，主密码保护
+- ✅ 配置本地存储 — 配置保存在用户目录（`~/.qzct/config.json`），账号密码为明文存储
 - ✅ 运行日志 — 详细的任务执行记录
-- ✅ 极简商务风界面 — 无边框圆角窗口，流畅拖动体验
+- ✅ 简洁商务风界面 — 卡片式两栏布局（状态/操作 + 运行日志），亮色/暗色主题即时切换
 
 ## 🛠️ 技术栈
 
@@ -36,7 +36,6 @@ QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的
 | Python 3.10+ | 编程语言 |
 | PyQt5 | GUI 框架 |
 | requests | 网络请求 |
-| cryptography | 密码加密 |
 | lunar-python | 农历日期处理 |
 | loguru | 日志系统 |
 
@@ -95,7 +94,6 @@ qzct-login/
 │   ├── config.py               # 配置管理
 │   ├── constants.py            # 常量定义
 │   ├── exceptions.py           # 自定义异常
-│   ├── encryption.py           # 加密模块
 │   ├── date_rules.py           # 日期规则
 │   ├── holidays.py             # 假期数据
 │   └── lunar.py                # 农历功能
@@ -111,11 +109,11 @@ qzct-login/
 ├── gui/
 │   ├── main_window.py          # 主窗口
 │   ├── tray_manager.py         # 系统托盘管理
-│   ├── encryption_gui.py       # 加密交互弹窗
 │   ├── log_sink.py             # GUI 日志转发
 │   ├── styling/                # 样式系统
 │   │   ├── constants.py        # 字体/样式常量
-│   │   ├── theme_manager.py    # 主题管理器
+│   │   ├── qss.py              # 全局 QSS 样式表生成
+│   │   ├── theme_manager.py    # 主题管理器（切换即全界面重绘）
 │   │   ├── themes.py           # 主题配色定义
 │   │   └── widgets.py          # 组件工厂
 │   ├── dialogs/                # 对话框模块
@@ -123,7 +121,7 @@ qzct-login/
 ├── utils/
 │   ├── version.py              # 版本管理
 │   └── logger.py               # 日志工具（Loguru 配置）
-├── tests/                      # 测试模块（291 个测试用例）
+├── tests/                      # 测试模块（290 个测试用例）
 ├── .github/
 │   └── workflows/              # GitHub Actions (CI + Release)
 ├── pyproject.toml              # 项目配置
@@ -139,10 +137,26 @@ qzct-login/
 
 ## 🔄 更新日志
 
+### v1.4.1 (2026-08-11)
+
+- 🔧 修复：GUI 日志跨线程投递失效（WiFi/登录/关机等服务层日志在界面日志框静默丢失），改用 Qt 信号跨线程投递
+- 🔧 修复：节假日/周末仍会执行 WiFi 连接、校园网登录与定时关机（任务链不按"需执行"条件短路）
+- 🔧 修复：启动 1 秒内重复点击"执行"可能导致进程崩溃（任务链防重入 + 关闭后断开旧链信号）
+- 🔧 修复：任务超时/取消后线程仍继续运行、占用工作线程（WiFi 重试与退避睡眠支持协作式取消）
+- 🔧 修复：打包版版本号恒显示 1.0.0（从 PyInstaller 解压目录读取 pyproject.toml）
+- 🔧 修复：环境同时安装 PyQt5/PyQt6 时测试失败（pytest 强制使用 PyQt5）
+- 🗑️ 移除：主密码加密体系（原实现反复误报"密码识别错误"且主密码可随时重置，保护形同虚设）；账号密码改为明文存储于 `~/.qzct/config.json`，旧版加密数据自动迁移清空
+- ✨ 重构 UI：简洁商务风卡片式两栏布局，全局 QSS 样式系统，亮色/暗色主题即时切换
+- ✨ 主界面改为标签页结构：运行日志 / 设置 / 任务日历，设置与万年历不再以弹窗形式打开
+- ✨ 万年历完整适配深色模式（主题调色板 + 动态刷新）
+- ✨ 精简"关于"对话框，与整体风格统一
+- 🧪 测试用例 290 个（289 通过 + 1 跳过），新增任务链短路、协作取消、日志跨线程投递、配置明文存储等回归用例
+- 🔧 其他：清理死代码、black 排除本地测试虚拟环境、格式化遗留文件
+
 ### v1.4.0 (2026-07-22)
 
 - 🔧 三轮深度审查，修复 133 个问题
-- 🧪 测试用例扩充至 291 个
+- 🧪 测试用例扩充至 290 个
 
 ### v1.3.0 (2026-05-24)
 

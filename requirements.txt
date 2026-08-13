@@ -2,7 +2,6 @@
 # 安装开发环境请使用：pip install -e ".[dev]"
 PyQt5>=5.15.0,<6.0.0
 requests>=2.25.0,<3.0.0
-cryptography>=41.0.0,<50.0.0
 lunar-python>=1.0.0,<2.0.0
 chinesecalendar>=1.0.0,<2.0.0
 tomli>=2.0.0; python_version < '3.11'
