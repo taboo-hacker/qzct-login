@@ -34,8 +34,11 @@ def should_work_today(check_date: datetime.date | None = None) -> bool:
     """
     判断指定日期是否需要执行自动化任务
 
-    判断优先级：硬编码调休日 > 硬编码节假日 > chinesecalendar > 周末规则。
-    硬编码数据覆盖学校特有假期（寒暑假），chinesecalendar 作为未来的法定假日兜底。
+    判断优先级：
+    1. 自定义规则（用户明确启用时完全遵守用户配置，最高优先级）
+    2. 硬编码调休上班日 > 硬编码节假日 > chinesecalendar > 周末规则
+       （硬编码数据覆盖学校特有假期（寒暑假），chinesecalendar 作为
+       未来的法定假日兜底）
 
     Args:
         check_date (datetime.date, optional): 要检查的日期，默认为今天
@@ -46,17 +49,8 @@ def should_work_today(check_date: datetime.date | None = None) -> bool:
     today = check_date if check_date is not None else datetime.date.today()
     date_rules = global_config.get("DATE_RULES", DEFAULT_CONFIG["DATE_RULES"])
 
-    # 1. 硬编码调休上班日（优先级最高）
-    compensatory_days = [
-        parsed
-        for d in global_config.get("COMPENSATORY_WORKDAYS", [])
-        if (parsed := parse_date_str(d)) is not None
-    ]
-    if today in compensatory_days:
-        return True
-
-    # 2. 自定义规则分支：用户明确启用了自定义规则，完全遵守用户配置，
-    #    不引入 chinesecalendar 兜底（否则覆盖用户意图）。
+    # 1. 自定义规则分支：用户明确启用了自定义规则，完全遵守用户配置，
+    #    硬编码调休/节假日与 chinesecalendar 兜底均不覆盖用户意图。
     if date_rules.get("ENABLE_CUSTOM_RULE", False):
         for period in date_rules.get("CUSTOM_WORKDAY_PERIODS", []):
             if is_date_in_period(today, period):
@@ -68,6 +62,15 @@ def should_work_today(check_date: datetime.date | None = None) -> bool:
         weekday = today.weekday()
         weekly_execute_days = date_rules.get("WEEKLY_EXECUTE_DAYS", [0, 1, 2, 3, 4])
         return weekday in weekly_execute_days
+
+    # 2. 硬编码调休上班日
+    compensatory_days = [
+        parsed
+        for d in global_config.get("COMPENSATORY_WORKDAYS", [])
+        if (parsed := parse_date_str(d)) is not None
+    ]
+    if today in compensatory_days:
+        return True
 
     # 3. 基础规则分支（使用硬编码节假日 + chinesecalendar 兜底）
     base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])

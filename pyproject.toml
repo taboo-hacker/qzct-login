@@ -1,6 +1,6 @@
 [project]
 name = "qzct-login"
-version = "1.5.0"
+version = "1.5.1"
 description = "校园网自动登录 + 定时关机工具"
 readme = "README.md"
 license = {text = "LICENSE"}
@@ -81,7 +81,6 @@ exclude = '''
     | buck-out
     | build
     | dist
-    | tests
 )/
 '''
 

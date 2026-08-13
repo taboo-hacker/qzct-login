@@ -31,7 +31,6 @@ class TestTaskContext:
         ctx = TaskContext("test_task")
 
         assert ctx.task_name == "test_task"
-        assert ctx._progress == 0
         assert ctx._cancelled is False
         assert ctx._logs == []
 
@@ -53,26 +52,6 @@ class TestTaskContext:
 
         assert logs == ["message"]
         assert logs is not ctx._logs
-
-    def test_set_progress(self):
-        """测试设置进度"""
-        ctx = TaskContext("test")
-
-        ctx.set_progress(50)
-        assert ctx._progress == 50
-
-        ctx.set_progress(100)
-        assert ctx._progress == 100
-
-    def test_set_progress_bounds(self):
-        """测试进度边界"""
-        ctx = TaskContext("test")
-
-        ctx.set_progress(-10)
-        assert ctx._progress == 0
-
-        ctx.set_progress(150)
-        assert ctx._progress == 100
 
     def test_cancel(self):
         """测试取消任务"""
@@ -103,7 +82,6 @@ class TestTaskDecorator:
         @task("执行测试任务", timeout=30)
         def executing_task(ctx: TaskContext) -> dict:
             ctx.log("开始执行")
-            ctx.set_progress(50)
             return {"done": True}
 
         ctx = TaskContext("test")
@@ -152,7 +130,6 @@ class TestTaskExecutor:
         executor.submit(long_task, "取消测试")
         executor.cancel_all()
 
-        assert executor._cancelled is True
         # 验证所有 context 的 cancel 标志已设置
         with executor._lock:
             for ctx in executor._contexts.values():

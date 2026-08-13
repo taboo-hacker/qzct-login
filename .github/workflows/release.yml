@@ -35,7 +35,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: 运行测试
-        run: pytest tests/ -v --tb=short --cov --cov-report=term-missing
+        run: pytest tests/ -v --tb=short --cov --cov-report=term-missing --cov-fail-under=70
 
       - name: Ruff 代码检查
         run: ruff check --output-format=github .

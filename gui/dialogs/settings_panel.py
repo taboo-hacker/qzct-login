@@ -180,9 +180,7 @@ class SettingsPanel(QWidget):
         self.wifi_name_edit.setMinimumHeight(30)
         wifi_layout.addRow("WiFi 名称：", self.wifi_name_edit)
 
-        self.wifi_password_edit, self.wifi_password_visible, pwd_layout = (
-            self._create_password_field("WIFI_PASSWORD")
-        )
+        self.wifi_password_edit, pwd_layout = self._create_password_field("WIFI_PASSWORD")
         wifi_layout.addRow("WiFi 密码：", pwd_layout)
 
         self.wifi_retry_edit = QLineEdit()
@@ -211,9 +209,7 @@ class SettingsPanel(QWidget):
         self.username_edit.setMinimumHeight(30)
         login_layout.addRow("用户名：", self.username_edit)
 
-        self.password_edit, self.password_visible, login_pwd_layout = self._create_password_field(
-            "PASSWORD"
-        )
+        self.password_edit, login_pwd_layout = self._create_password_field("PASSWORD")
         login_layout.addRow("密码：", login_pwd_layout)
 
         self.isp_combo = QComboBox()
@@ -325,7 +321,7 @@ class SettingsPanel(QWidget):
 
         parent_layout.addLayout(save_row)
 
-    def _create_password_field(self, field_name: str) -> tuple[QLineEdit, QPushButton, QHBoxLayout]:
+    def _create_password_field(self, field_name: str) -> tuple[QLineEdit, QHBoxLayout]:
         """创建带显示/隐藏切换的密码输入框"""
         edit = QLineEdit()
         edit.setText(global_config.get(field_name, DEFAULT_CONFIG.get(field_name, "")))
@@ -340,7 +336,7 @@ class SettingsPanel(QWidget):
         layout = QHBoxLayout()
         layout.addWidget(edit)
         layout.addWidget(btn)
-        return edit, btn, layout
+        return edit, layout
 
     def toggle_password_visibility(self, password_edit: QLineEdit, button: QPushButton) -> None:
         """切换密码可见性"""

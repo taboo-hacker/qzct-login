@@ -37,14 +37,12 @@ def task_check_condition(
 @task("连接WiFi", timeout=120)
 def task_connect_wifi(ctx: TaskContext) -> dict[str, Any]:
     ctx.log("开始连接WiFi网络")
-    ctx.set_progress(10)
 
     # 传入取消检查回调：任务超时/取消时，重试循环与退避睡眠可协作式退出
     cfg = get_config_snapshot()
     wifi_connected = auto_connect_wifi(cfg, should_cancel=ctx.is_cancelled)
     if wifi_connected:
         ctx.log("WiFi网络连接成功")
-        ctx.set_progress(100)
         return {"wifi_connected": True}
     else:
         ctx.log("WiFi连接失败")
@@ -54,12 +52,10 @@ def task_connect_wifi(ctx: TaskContext) -> dict[str, Any]:
 @task("登录校园网", timeout=30)
 def task_campus_login(ctx: TaskContext) -> dict[str, Any]:
     ctx.log("开始登录校园网认证系统")
-    ctx.set_progress(10)
 
     login_ok = campus_login()
     if login_ok:
         ctx.log("校园网认证系统登录成功")
-        ctx.set_progress(100)
         return {"login_successful": True}
     else:
         ctx.log("校园网登录失败，请检查账号密码或网络")
@@ -92,7 +88,6 @@ def task_set_shutdown(ctx: TaskContext, check_date: datetime.date | None = None)
                     ctx.log(
                         f"已设置定时关机，将在 {shutdown_hour:02d}:{shutdown_min:02d} 自动关机（{seconds}秒后）"
                     )
-                    ctx.set_progress(100)
                     return {"shutdown_set": True, "seconds": seconds}
                 else:
                     ctx.log("关机命令执行失败，请检查系统权限")

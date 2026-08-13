@@ -357,8 +357,6 @@ class MainWindow(QMainWindow):
         self.task_executor.started.connect(self._on_task_started)
         self.task_executor.finished.connect(self._on_task_finished)
         self.task_executor.error.connect(self._on_task_error)
-        self.task_executor.progress.connect(self._on_task_progress)
-        self.task_executor.all_finished.connect(self._on_all_tasks_finished)
 
         chain = TaskChain(parent=self)
         chain.add(task_check_condition)
@@ -381,9 +379,6 @@ class MainWindow(QMainWindow):
         error("main", f"任务出错: {task_name} - {error_msg}")
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"{task_name} 出错")
-
-    def _on_task_progress(self, task_name: str, percent: int) -> None:
-        info("main", f"任务进度: {task_name} - {percent}%")
 
     def _on_chain_success(self, success: bool, results: dict[str, Any]) -> None:
         self._set_buttons_enabled(True)
@@ -408,10 +403,6 @@ class MainWindow(QMainWindow):
         self._set_buttons_enabled(True)
         self.footer_status.setText("任务链执行失败")
         error("main", f"任务链执行失败: {results}")
-
-    def _on_all_tasks_finished(self, success: bool) -> None:
-        self._set_buttons_enabled(True)
-        info("main", f"所有任务执行完成，成功: {success}")
 
     # ------------------------------------------------------------------
     # 按钮事件

@@ -17,7 +17,6 @@ CHAIN_BREAK_KEY = "chain_break"
 class TaskContext:
     def __init__(self, task_name: str):
         self.task_name = task_name
-        self._progress = 0
         self._cancelled = False
         self._logs: list[str] = []
         self._lock = threading.Lock()
@@ -25,10 +24,6 @@ class TaskContext:
     def log(self, message: str) -> None:
         with self._lock:
             self._logs.append(message)
-
-    def set_progress(self, percent: int) -> None:
-        with self._lock:
-            self._progress = max(0, min(100, percent))
 
     def is_cancelled(self) -> bool:
         with self._lock:
@@ -54,8 +49,6 @@ class TaskExecutor(QObject):
     started = Signal(str)
     finished = Signal(str, object)
     error = Signal(str, str)
-    progress = Signal(str, int)
-    all_finished = Signal(bool)
 
     def __init__(self, max_workers: int | None = None):
         super().__init__()
@@ -67,7 +60,6 @@ class TaskExecutor(QObject):
         self._max_workers = max_workers
         self._tasks: dict[str, Future[Any]] = {}
         self._contexts: dict[str, TaskContext] = {}
-        self._cancelled = False
         self._lock = threading.Lock()
 
         # 链式执行状态
@@ -150,7 +142,6 @@ class TaskExecutor(QObject):
         运行中任务通过 TaskContext 的取消标志协作式停止（任务函数需检查
         ctx.is_cancelled()）；未启动的 future 直接取消。
         """
-        self._cancelled = True
         with self._lock:
             contexts = list(self._contexts.values())
             tasks = list(self._tasks.values())

@@ -175,6 +175,44 @@ class TestDateRules:
         thursday = datetime.date(2026, 1, 8)
         assert should_work_today(thursday) is False
 
+    def test_custom_rule_overrides_compensatory_workday(self, sample_config):
+        """自定义规则启用时，硬编码调休上班日不再强制上班（M6 回归）。"""
+        config = sample_config.copy()
+        # 2026-01-04 是周日，且在 sample_config 的 COMPENSATORY_WORKDAYS 中
+        config["COMPENSATORY_WORKDAYS"] = ["2026-01-04"]
+        config["DATE_RULES"] = {
+            "ENABLE_CUSTOM_RULE": True,
+            "WEEKLY_EXECUTE_DAYS": [0, 1, 2, 3, 4],  # 仅工作日
+            "CUSTOM_HOLIDAY_PERIODS": [],
+            "CUSTOM_WORKDAY_PERIODS": [],
+        }
+        global_config.clear()
+        global_config.update(config)
+
+        # 自定义规则下按周末处理，硬编码调休不再覆盖用户意图
+        sunday = datetime.date(2026, 1, 4)
+        assert should_work_today(sunday) is False
+
+    def test_custom_workday_period_overrides_base_holiday(self, sample_config):
+        """自定义工作日区间优先于硬编码节假日。"""
+        config = sample_config.copy()
+        config["COMPENSATORY_WORKDAYS"] = []
+        config["HOLIDAY_PERIODS"] = [{"name": "劳动节", "start": "2026-05-01", "end": "2026-05-05"}]
+        config["DATE_RULES"] = {
+            "ENABLE_CUSTOM_RULE": True,
+            "WEEKLY_EXECUTE_DAYS": [],
+            "CUSTOM_HOLIDAY_PERIODS": [],
+            "CUSTOM_WORKDAY_PERIODS": [
+                {"name": "自定义上班", "start": "2026-05-04", "end": "2026-05-05"}
+            ],
+        }
+        global_config.clear()
+        global_config.update(config)
+
+        # 2026-05-04 在硬编码劳动节假期内，但自定义工作日区间优先
+        workday = datetime.date(2026, 5, 4)
+        assert should_work_today(workday) is True
+
 
 class TestISPMapping:
     """ISP 映射测试"""

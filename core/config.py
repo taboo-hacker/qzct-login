@@ -185,15 +185,22 @@ def load_config() -> None:
             # 旧版主密码配置项已废弃
             new_config.pop("MASTER_PASSWORD", None)
 
-            if "ISP_SUFFIX" in new_config and "ISP_TYPE" not in new_config:
-                suffix = new_config["ISP_SUFFIX"]
+            # 旧版 ISP_SUFFIX 迁移：仅在配置文件确实提供该字段时生效
+            # （不能判断 ISP_TYPE 是否存在——DEFAULT_CONFIG 自带默认值，
+            #   旧条件恒为 False 导致迁移从未生效）
+            if "ISP_SUFFIX" in loaded_config:
+                suffix = loaded_config["ISP_SUFFIX"]
+                migrated = False
                 for type_key, type_suffix in ISP_MAPPING.items():
                     if type_suffix == suffix:
                         new_config["ISP_TYPE"] = type_key
-                        del new_config["ISP_SUFFIX"]
+                        migrated = True
                         break
+                new_config.pop("ISP_SUFFIX", None)
+                if migrated:
+                    info("system_core", f"已迁移 ISP_SUFFIX {suffix} -> ISP_TYPE")
                 else:
-                    del new_config["ISP_SUFFIX"]
+                    warning("system_core", f"未知 ISP_SUFFIX {suffix}，已丢弃")
 
             if "COMPENSATORY_WORKDAYS" not in new_config:
                 new_config["COMPENSATORY_WORKDAYS"] = DEFAULT_CONFIG["COMPENSATORY_WORKDAYS"].copy()

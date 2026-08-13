@@ -103,7 +103,7 @@ jobs:
       - name: 运行测试
         env:
           QT_QPA_PLATFORM: ${{ runner.os == 'Linux' && 'offscreen' || '' }}
-        run: pytest tests/ -v --tb=short --cov --cov-report=xml --cov-report=term-missing
+        run: pytest tests/ -v --tb=short --cov --cov-report=xml --cov-report=term-missing --cov-fail-under=70
 
       - name: 上传覆盖率报告
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
