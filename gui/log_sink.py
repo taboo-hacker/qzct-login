@@ -2,14 +2,14 @@
 GUI 日志 Sink
 
 将 Loguru 日志安全转发到 PyQt GUI 组件。
-从 utils/logger.py 中拆出，使 utils/ 层不再在模块加载时耦合 PyQt5。
+从 utils/logger.py 中拆出，使 utils/ 层不再在模块加载时耦合 PySide6。
 
 跨线程投递机制：
     loguru 的 sink.write() 在调用线程（可能是 TaskExecutor 工作线程）执行，
     直接操作 widget 违反 Qt 线程规则。旧实现用 QTimer.singleShot(0, callable)
     从工作线程投递，但该回调需要调用线程存在事件循环，工作线程没有事件循环，
     导致服务层日志在 GUI 中全部静默丢失。
-    现改用 pyqtSignal 投递：槽函数绑定在 sink 所属线程（主线程），
+    现改用 Signal 投递：槽函数绑定在 sink 所属线程（主线程），
     Qt 对跨线程 emit 自动使用 QueuedConnection，消息可靠送达。
 """
 
@@ -17,8 +17,8 @@ import contextlib
 import threading
 from typing import Any, Optional
 
-from PyQt5.QtCore import QObject, pyqtSignal
-from PyQt5.QtWidgets import QWidget
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QTextEdit
 
 
 class QtLogSink(QObject):
@@ -34,21 +34,21 @@ class QtLogSink(QObject):
     _pending_lock = threading.Lock()
 
     # 跨线程日志消息通道（emit 可发生在任意线程，槽在主线程执行）
-    _log_message = pyqtSignal(str)
+    _log_message = Signal(str)
 
-    def __init__(self, gui_widget: QWidget | None = None) -> None:
+    def __init__(self, gui_widget: QTextEdit | None = None) -> None:
         super().__init__()
-        self._gui_widget: QWidget | None = None
+        self._gui_widget: QTextEdit | None = None
         self._destroyed_conn: Any = None
         self._log_message.connect(self._on_log_message)
         if gui_widget is not None:
             self.set_widget(gui_widget)
 
     @property
-    def gui_widget(self) -> QWidget | None:
+    def gui_widget(self) -> QTextEdit | None:
         return self._gui_widget
 
-    def set_widget(self, widget: QWidget) -> None:
+    def set_widget(self, widget: QTextEdit) -> None:
         """设置 GUI widget 并监听其 destroyed 信号以清空引用。"""
         # 断开旧 widget 的 destroyed 信号
         if self._gui_widget is not None:
@@ -64,7 +64,7 @@ class QtLogSink(QObject):
         self._destroyed_conn = None
 
     @classmethod
-    def set_gui_widget(cls, widget: QWidget) -> None:
+    def set_gui_widget(cls, widget: QTextEdit) -> None:
         if cls._instance is None:
             cls._instance = cls(widget)
         else:
@@ -89,7 +89,7 @@ class QtLogSink(QObject):
         if self._gui_widget is not None:
             self._safe_append_to_gui(self._gui_widget, message)
 
-    def _safe_append_to_gui(self, widget: QWidget, message: str) -> None:
+    def _safe_append_to_gui(self, widget: QTextEdit, message: str) -> None:
         """安全地向 GUI 追加日志，widget 已销毁时静默丢弃。"""
         try:
             cursor = widget.textCursor()

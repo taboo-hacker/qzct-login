@@ -233,7 +233,7 @@ def load_config() -> None:
     except Exception as e:
         error("system_core", f"加载配置失败，使用默认配置：{e}")
         global_config.replace_all(copy.deepcopy(DEFAULT_CONFIG))
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.warning(
             None,
@@ -263,7 +263,7 @@ def save_config() -> bool:
         return True
     except Exception as e:
         error("system_core", f"保存配置失败：{e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.critical(None, "错误", f"保存配置失败：{e}")
         return False

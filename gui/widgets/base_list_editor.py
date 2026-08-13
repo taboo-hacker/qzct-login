@@ -6,7 +6,7 @@
 
 from typing import Any
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
@@ -155,7 +155,7 @@ class BaseListEditorWidget(QWidget):
             self,
             "确认",
             self._get_clear_confirm_text(),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,  # type: ignore[arg-type]
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._set_items([])

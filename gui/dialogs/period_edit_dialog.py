@@ -5,8 +5,8 @@
 
 from typing import Any
 
-from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import QDate, Qt
+from PySide6.QtWidgets import (
     QDateEdit,
     QDialog,
     QFormLayout,
@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from gui.styling.constants import FontSize
@@ -27,7 +28,7 @@ class PeriodEditDialog(QDialog):
 
     def __init__(
         self,
-        parent: QDialog | None = None,
+        parent: QWidget | None = None,
         period: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(parent)

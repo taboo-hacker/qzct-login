@@ -7,7 +7,7 @@
 
 from typing import Optional
 
-from PyQt5.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget
 
 from gui.styling.themes import BUILTIN_THEMES, ThemeColors
 
@@ -56,7 +56,7 @@ class ThemeManager:
     @classmethod
     def _apply_qss(cls) -> None:
         """将当前主题的全局 QSS 应用到 QApplication（尚未创建时跳过）。"""
-        from PyQt5.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
         if not isinstance(app, QApplication):

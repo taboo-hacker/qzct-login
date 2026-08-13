@@ -5,7 +5,7 @@ SettingsDialog 为 SettingsPanel 的对话框包装（兼容旧调用方与测�
 主窗口内已改用嵌入式"设置"标签页，不再弹窗。
 """
 
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
 from gui.dialogs.settings_panel import SettingsPanel
 

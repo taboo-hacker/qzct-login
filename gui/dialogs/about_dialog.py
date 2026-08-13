@@ -7,15 +7,16 @@
 
 from typing import cast
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QCloseEvent
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from gui.styling.widgets import create_button, create_label
@@ -25,7 +26,7 @@ from utils.version import get_project_version
 class AboutDialog(QDialog):
     """关于对话框（简洁版）"""
 
-    def __init__(self, parent: QDialog | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.version: str = get_project_version()
         self.version_btn: QPushButton | None = None
@@ -70,7 +71,7 @@ class AboutDialog(QDialog):
         v.addSpacing(4)
 
         # 分隔线
-        from PyQt5.QtWidgets import QFrame
+        from PySide6.QtWidgets import QFrame
 
         line = QFrame()
         line.setObjectName("divider")
@@ -130,7 +131,7 @@ class AboutDialog(QDialog):
         if self.version_btn:
             self.version_btn.setText(original_text)
 
-    def closeEvent(self, event: QCloseEvent | None) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         """关闭时停止定时器，避免在对话框销毁后触发回调"""
         if self._restore_timer is not None:
             self._restore_timer.stop()

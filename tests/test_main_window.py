@@ -7,7 +7,7 @@ MainWindow 构造需要加载配置、初始化日志与托盘，测试中全部
 
 import sys
 
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 
 def _ensure_qapp() -> QApplication:

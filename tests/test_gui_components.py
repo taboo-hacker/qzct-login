@@ -2,7 +2,7 @@
 gui/tray_manager.py + gui/log_sink.py 补充测试
 """
 
-from PyQt5.QtWidgets import QApplication, QTextEdit, QWidget
+from PySide6.QtWidgets import QApplication, QTextEdit, QWidget
 
 from gui.log_sink import QtLogSink
 
@@ -106,9 +106,9 @@ class TestTrayManager:
 
         with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
             tm = TrayManager(parent)
-            from PyQt5.QtWidgets import QSystemTrayIcon
+            from PySide6.QtWidgets import QSystemTrayIcon
 
-            tm._on_activated(QSystemTrayIcon.DoubleClick)
+            tm._on_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
             assert parent.isVisible()
 
     def test_on_activated_single_click_noop(self, qtbot):
@@ -227,7 +227,7 @@ class TestQtLogSink:
     def test_write_without_gui_widget_buffers(self, qtbot):
         """无 gui_widget 但有 flush_timer 时缓冲日志"""
         _ensure_qapp()
-        from PyQt5.QtCore import QTimer
+        from PySide6.QtCore import QTimer
 
         sink = QtLogSink(None)
         QtLogSink._flush_timer = QTimer()  # 模拟已设置 flush_timer

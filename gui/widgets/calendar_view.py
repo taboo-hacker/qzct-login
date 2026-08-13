@@ -9,9 +9,9 @@ import datetime
 from typing import Any
 
 from lunar_python import Solar
-from PyQt5.QtCore import QDate, Qt
-from PyQt5.QtGui import QColor, QPalette, QTextCharFormat
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import QDate, Qt
+from PySide6.QtGui import QColor, QPalette, QTextCharFormat
+from PySide6.QtWidgets import (
     QCalendarWidget,
     QFrame,
     QHBoxLayout,

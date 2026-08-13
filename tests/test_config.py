@@ -50,7 +50,7 @@ class TestSaveConfig:
         cfg_module._get_config_dir()
         with (
             patch("core.config.os.replace", side_effect=OSError("disk full")),
-            patch("PyQt5.QtWidgets.QMessageBox.critical") as mock_critical,
+            patch("PySide6.QtWidgets.QMessageBox.critical") as mock_critical,
         ):
             assert save_config() is False
             mock_critical.assert_called_once()
@@ -108,7 +108,7 @@ class TestLoadConfig:
     def test_load_corrupted_file_falls_back_to_defaults(self, temp_config_dir) -> None:
         """配置文件损坏时回退默认配置并提示。"""
         (temp_config_dir / "config.json").write_text("{not valid json", encoding="utf-8")
-        with patch("PyQt5.QtWidgets.QMessageBox.warning") as mock_warning:
+        with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warning:
             load_config()
             mock_warning.assert_called_once()
 

@@ -4,7 +4,7 @@ gui/widgets/* 补充测试
 覆盖 BaseListEditorWidget, BaseHolidayWidget, CompensatoryWorkdayWidget, DateRuleWidget。
 """
 
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 from core.config import global_config
 
@@ -18,7 +18,7 @@ class TestBaseListEditorWidget:
 
     def _make_concrete_editor(self, columns=None, title="", tip=""):
         """创建可实例化的子类（基类是抽象的，__init__ 调用 refresh 触发 _get_items）"""
-        from PyQt5.QtWidgets import QTableWidgetItem
+        from PySide6.QtWidgets import QTableWidgetItem
 
         from gui.widgets.base_list_editor import BaseListEditorWidget
 
@@ -73,7 +73,7 @@ class TestBaseListEditorWidget:
                 self._items = items
 
             def _row_to_cells(self, item):
-                from PyQt5.QtWidgets import QTableWidgetItem
+                from PySide6.QtWidgets import QTableWidgetItem
 
                 return [
                     QTableWidgetItem(item["name"]),
@@ -89,7 +89,7 @@ class TestBaseListEditorWidget:
         _ensure_qapp()
         from unittest.mock import patch
 
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
 
         from gui.widgets.base_list_editor import BaseListEditorWidget
 
@@ -105,7 +105,7 @@ class TestBaseListEditorWidget:
                 self._items = items
 
             def _row_to_cells(self, item):
-                from PyQt5.QtWidgets import QTableWidgetItem
+                from PySide6.QtWidgets import QTableWidgetItem
 
                 return [QTableWidgetItem(item["name"])]
 
@@ -134,7 +134,7 @@ class TestBaseListEditorWidget:
                 self._items = items
 
             def _row_to_cells(self, item):
-                from PyQt5.QtWidgets import QTableWidgetItem
+                from PySide6.QtWidgets import QTableWidgetItem
 
                 return [QTableWidgetItem(item["name"])]
 
@@ -165,7 +165,7 @@ class TestBaseListEditorWidget:
                 self._items = items
 
             def _row_to_cells(self, item):
-                from PyQt5.QtWidgets import QTableWidgetItem
+                from PySide6.QtWidgets import QTableWidgetItem
 
                 return [QTableWidgetItem(str(item))]
 
@@ -221,7 +221,7 @@ class TestBaseHolidayWidget:
 
     def test_add_item(self, qtbot):
         _ensure_qapp()
-        from PyQt5.QtCore import QDate
+        from PySide6.QtCore import QDate
 
         from gui.widgets.holiday_widget import BaseHolidayWidget
 
@@ -257,7 +257,7 @@ class TestBaseHolidayWidget:
     def test_add_item_invalid_dates(self, qtbot):
         """开始日期晚于结束日期不添加"""
         _ensure_qapp()
-        from PyQt5.QtCore import QDate
+        from PySide6.QtCore import QDate
 
         from gui.widgets.holiday_widget import BaseHolidayWidget
 

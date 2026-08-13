@@ -5,7 +5,7 @@ GUI 模块测试
 """
 
 import pytest
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 from gui.styling.themes import BUILTIN_THEMES, ThemeColors, create_dark_theme, create_light_theme
 

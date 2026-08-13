@@ -2,7 +2,7 @@
 Loguru 日志系统配置
 
 提供日志器初始化和配置。QtLogSink 已移至 gui/log_sink.py，
-本模块通过延迟导入使用，使 utils/ 层不再在模块加载时耦合 PyQt5。
+本模块通过延迟导入使用，使 utils/ 层不再在模块加载时耦合 PySide6。
 """
 
 import os

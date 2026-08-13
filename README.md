@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.4.1](https://img.shields.io/badge/Version-1.4.1-blue.svg)](pyproject.toml)
+[![Version: 1.5.0](https://img.shields.io/badge/Version-1.5.0-blue.svg)](pyproject.toml)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -14,7 +14,7 @@
 
 ## 📖 简介
 
-QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的自动化登录工具。基于 PyQt5 开发，采用极简商务风界面，支持 WiFi 自动连接、校园网认证、定时关机等核心功能。
+QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的自动化登录工具。基于 PySide6（Qt for Python，LGPL 许可）开发，采用极简商务风界面，支持 WiFi 自动连接、校园网认证、定时关机等核心功能。
 
 ⚡ 本项目采用 AI 辅助开发，通过 Claude Code + DeepSeek API 进行代码审查与 UI 重构，实践 AI-First 开发理念。
 
@@ -34,7 +34,7 @@ QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的
 | 技术 | 说明 |
 | --- | --- |
 | Python 3.10+ | 编程语言 |
-| PyQt5 | GUI 框架 |
+| PySide6 | GUI 框架（LGPL 许可） |
 | requests | 网络请求 |
 | lunar-python | 农历日期处理 |
 | loguru | 日志系统 |
@@ -137,6 +137,13 @@ qzct-login/
 
 ## 🔄 更新日志
 
+### v1.5.0 (2026-08-13)
+
+- ✨ 从 PyQt5 迁移到 PySide6 6.11（官方 Qt for Python，LGPL 许可，分发更自由；Qt 6 运行时持续维护，Windows 11 原生风格与高 DPI 支持）
+- ✨ mypy 类型检查真实生效：PySide6 自带类型存根，迁移中修复 9 处类型问题（日志组件类型收窄、对话框 parent 类型等）
+- 🔧 适配 Qt6：移除 Qt5 高 DPI 兼容代码（Qt6 默认启用）、托盘图标/激活/通知枚举改作用域写法、并发框架信号连接按信号精确断开（消除 PySide6 RuntimeWarning）
+- 🧪 291 个测试用例全部通过；CI Linux 依赖补充 libgl1
+
 ### v1.4.1 (2026-08-11)
 
 - 🔧 修复：GUI 日志跨线程投递失效（WiFi/登录/关机等服务层日志在界面日志框静默丢失），改用 Qt 信号跨线程投递
@@ -144,7 +151,7 @@ qzct-login/
 - 🔧 修复：启动 1 秒内重复点击"执行"可能导致进程崩溃（任务链防重入 + 关闭后断开旧链信号）
 - 🔧 修复：任务超时/取消后线程仍继续运行、占用工作线程（WiFi 重试与退避睡眠支持协作式取消）
 - 🔧 修复：打包版版本号恒显示 1.0.0（从 PyInstaller 解压目录读取 pyproject.toml）
-- 🔧 修复：环境同时安装 PyQt5/PyQt6 时测试失败（pytest 强制使用 PyQt5）
+- 🔧 修复：环境同时安装多套 Qt 绑定时测试失败（pytest 强制指定 Qt 绑定）
 - 🗑️ 移除：主密码加密体系（原实现反复误报"密码识别错误"且主密码可随时重置，保护形同虚设）；账号密码改为明文存储于 `~/.qzct/config.json`，旧版加密数据自动迁移清空
 - ✨ 重构 UI：简洁商务风卡片式两栏布局，全局 QSS 样式系统，亮色/暗色主题即时切换
 - ✨ 主界面改为标签页结构：运行日志 / 设置 / 任务日历，设置与万年历不再以弹窗形式打开

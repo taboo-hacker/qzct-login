@@ -47,7 +47,7 @@ class TestSetupLogger:
 
     def test_gui_widget_adds_handler(self, qtbot):
         """传入 gui_widget 时添加 QtLogSink handler"""
-        from PyQt5.QtWidgets import QTextEdit
+        from PySide6.QtWidgets import QTextEdit
 
         from utils.logger import setup_logger
 
@@ -71,7 +71,7 @@ class TestSetGuiWidget:
     """set_gui_widget 测试"""
 
     def test_sets_widget(self, qtbot):
-        from PyQt5.QtWidgets import QTextEdit
+        from PySide6.QtWidgets import QTextEdit
 
         from gui.log_sink import QtLogSink
         from utils.logger import set_gui_widget

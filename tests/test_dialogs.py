@@ -4,7 +4,7 @@ gui/dialogs/* 补充测试
 覆盖 PeriodEditDialog, AboutDialog, SettingsDialog。
 """
 
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 from core.config import global_config
 
@@ -53,7 +53,7 @@ class TestPeriodEditDialog:
 
     def test_save_success(self, qtbot):
         _ensure_qapp()
-        from PyQt5.QtCore import QDate
+        from PySide6.QtCore import QDate
 
         from gui.dialogs.period_edit_dialog import PeriodEditDialog
 
@@ -72,7 +72,7 @@ class TestPeriodEditDialog:
         _ensure_qapp()
         from unittest.mock import patch
 
-        from PyQt5.QtCore import QDate
+        from PySide6.QtCore import QDate
 
         from gui.dialogs.period_edit_dialog import PeriodEditDialog
 
@@ -144,7 +144,7 @@ class TestSettingsDialog:
         global_config.clear()
         global_config.update(DEFAULT_CONFIG)
 
-        from PyQt5.QtWidgets import QScrollArea
+        from PySide6.QtWidgets import QScrollArea
 
         from gui.dialogs.settings_dialog import SettingsDialog
 
@@ -190,7 +190,7 @@ class TestSettingsDialog:
         global_config.clear()
         global_config.update(DEFAULT_CONFIG)
 
-        from PyQt5.QtWidgets import QLineEdit, QPushButton
+        from PySide6.QtWidgets import QLineEdit, QPushButton
 
         from gui.dialogs.settings_dialog import SettingsDialog
 

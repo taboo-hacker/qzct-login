@@ -6,8 +6,8 @@
 import copy
 from typing import Any
 
-from PyQt5.QtCore import QDate
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import QDate
+from PySide6.QtWidgets import (
     QDateEdit,
     QHBoxLayout,
     QLabel,

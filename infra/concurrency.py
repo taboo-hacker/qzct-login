@@ -8,7 +8,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import suppress
 from typing import Any, Optional
 
-from PyQt5.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 # 任务链步骤结果字典中的提前终止标记：值为真时链以"成功"结束并跳过剩余步骤
 CHAIN_BREAK_KEY = "chain_break"
@@ -51,11 +51,11 @@ class TaskExecutor(QObject):
     支持 submit（单任务）和 execute_chain（顺序任务链）两种模式。
     """
 
-    started = pyqtSignal(str)
-    finished = pyqtSignal(str, object)
-    error = pyqtSignal(str, str)
-    progress = pyqtSignal(str, int)
-    all_finished = pyqtSignal(bool)
+    started = Signal(str)
+    finished = Signal(str, object)
+    error = Signal(str, str)
+    progress = Signal(str, int)
+    all_finished = Signal(bool)
 
     def __init__(self, max_workers: int | None = None):
         super().__init__()
@@ -75,7 +75,8 @@ class TaskExecutor(QObject):
         self._chain_index = 0
         self._chain_results: dict[str, Any] = {}
         self._chain_on_complete: Callable[[bool, dict[str, Any]], None] | None = None
-        self._chain_connections: list[Any] = []
+        # 链信号连接（信号, 连接对象）成对记录，断开时用对应信号精确断开
+        self._chain_connections: list[tuple[Any, Any]] = []
         self._chain_active = False
 
     @property
@@ -168,7 +169,7 @@ class TaskExecutor(QObject):
 
         同时中止未完成的任务链并断开其信号连接：避免关闭后运行中任务
         完成时信号触发 _execute_chain_next 在已关闭线程池上 submit，
-        抛出 RuntimeError 导致 PyQt5 abort。
+        抛出 RuntimeError 导致 PySide6 abort。
         """
         with self._lock:
             self._chain_active = False
@@ -200,19 +201,17 @@ class TaskExecutor(QObject):
 
         self._disconnect_chain_signals()
         self._chain_connections = [
-            self.finished.connect(self._on_chain_task_finished),
-            self.error.connect(self._on_chain_task_error),
+            (self.finished, self.finished.connect(self._on_chain_task_finished)),
+            (self.error, self.error.connect(self._on_chain_task_error)),
         ]
 
         self._execute_chain_next()
 
     def _disconnect_chain_signals(self) -> None:
-        """断开任务链使用的信号连接。"""
-        for conn in self._chain_connections:
-            with suppress(TypeError):
-                self.finished.disconnect(conn)
-            with suppress(TypeError):
-                self.error.disconnect(conn)
+        """断开任务链使用的信号连接（用对应信号精确断开，避免误断/告警）。"""
+        for signal, conn in self._chain_connections:
+            with suppress(RuntimeError, TypeError):
+                signal.disconnect(conn)
         self._chain_connections = []
 
     def _execute_chain_next(self) -> None:
@@ -226,7 +225,7 @@ class TaskExecutor(QObject):
             self.submit(step["func"], step["name"], *step["args"], **step["kwargs"])
         except RuntimeError:
             # 线程池已被关闭（如主窗口退出/链被中止）：按失败终止链，
-            # 不能让异常逃逸出 Qt 槽（PyQt5 会直接 abort 进程）
+            # 不能让异常逃逸出 Qt 槽（PySide6 会直接 abort 进程）
             self._chain_results[step["name"]] = {"error": "线程池已关闭，无法提交任务"}
             self._finish_chain(False)
 

@@ -10,9 +10,9 @@ import sys
 import time
 from typing import Any
 
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QCloseEvent
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QCloseEvent
+from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
 
     def start_task_chain(self) -> None:
         # 防重入：旧链仍在执行时忽略重复启动请求（否则旧链信号会在
-        # 已关闭的线程池上触发提交，导致 PyQt5 abort）
+        # 已关闭的线程池上触发提交，导致 PySide6 abort）
         if self.task_executor is not None and self.task_executor.is_chain_active():
             info("main", "任务链正在执行，忽略重复启动请求")
             return
