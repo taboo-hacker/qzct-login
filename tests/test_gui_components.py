@@ -1,8 +1,7 @@
 """
-gui/tray_manager.py + gui/log_sink.py + gui/encryption_gui.py 补充测试
+gui/tray_manager.py + gui/log_sink.py 补充测试
 """
 
-import pytest
 from PyQt5.QtWidgets import QApplication, QTextEdit, QWidget
 
 from gui.log_sink import QtLogSink
@@ -192,7 +191,7 @@ class TestQtLogSink:
         assert QtLogSink._instance.gui_widget is w2
 
     def test_write_with_gui_widget(self, qtbot):
-        """有 gui_widget 时通过 QTimer 转发"""
+        """有 gui_widget 时通过跨线程信号投递"""
         _ensure_qapp()
         widget = QTextEdit()
         qtbot.addWidget(widget)
@@ -202,6 +201,28 @@ class TestQtLogSink:
         # 处理事件循环
         QApplication.processEvents()
         assert "test message" in widget.toPlainText()
+
+    def test_write_from_worker_thread_delivers_to_gui(self, qtbot):
+        """工作线程调用 write() 后日志投递到 GUI（回归：旧 singleShot 实现丢失）"""
+        import threading
+
+        _ensure_qapp()
+        widget = QTextEdit()
+        qtbot.addWidget(widget)
+        QtLogSink.set_gui_widget(widget)
+        sink = QtLogSink._instance
+
+        def worker():
+            # 模拟 TaskExecutor 工作线程里的 loguru 调用
+            sink.write("from worker thread\n")
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        # 跨线程信号为 QueuedConnection，泵事件循环后送达
+        for _ in range(50):
+            QApplication.processEvents()
+        assert "from worker thread" in widget.toPlainText()
 
     def test_write_without_gui_widget_buffers(self, qtbot):
         """无 gui_widget 但有 flush_timer 时缓冲日志"""
@@ -244,132 +265,3 @@ class TestQtLogSink:
         QtLogSink._instance = QtLogSink(QTextEdit())
         QtLogSink.flush_pending_logs()
         QApplication.processEvents()
-
-
-# =====================================================================
-# encryption_gui
-# =====================================================================
-
-
-class TestEncryptionGui:
-    """encryption_gui 测试"""
-
-    def test_prompt_for_master_password_success(self, qtbot):
-        """用户输入并确认密码"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.encryption_gui import prompt_for_master_password
-
-        with (
-            patch("gui.encryption_gui.QInputDialog.getText") as mock_get,
-        ):
-            # 第一次：输入密码，第二次：确认密码
-            mock_get.side_effect = [
-                ("mypassword", True),
-                ("mypassword", True),
-            ]
-            result = prompt_for_master_password()
-            assert result == "mypassword"
-
-    def test_prompt_for_master_password_cancel_first(self):
-        """用户在首次输入时取消"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.encryption_gui import prompt_for_master_password
-
-        with (
-            patch("gui.encryption_gui.QInputDialog.getText", return_value=("", False)),
-            pytest.raises(SystemExit),
-        ):
-            prompt_for_master_password()
-
-    def test_prompt_for_master_password_empty_then_cancel(self):
-        """用户输入空密码后取消"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.encryption_gui import prompt_for_master_password
-
-        with (
-            patch("gui.encryption_gui.QInputDialog.getText") as mock_get,
-            patch("gui.encryption_gui.QMessageBox.warning"),
-        ):
-            mock_get.side_effect = [
-                ("", True),  # 空密码
-                ("", False),  # 取消
-            ]
-            with pytest.raises(SystemExit):
-                prompt_for_master_password()
-
-    def test_prompt_for_master_password_mismatch_then_success(self):
-        """密码不一致后重新输入成功"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.encryption_gui import prompt_for_master_password
-
-        with (
-            patch("gui.encryption_gui.QInputDialog.getText") as mock_get,
-            patch("gui.encryption_gui.QMessageBox.warning"),
-        ):
-            mock_get.side_effect = [
-                ("pass1", True),  # 第一次输入
-                ("pass2", True),  # 确认不一致
-                ("pass1", True),  # 重新输入
-                ("pass1", True),  # 确认一致
-            ]
-            result = prompt_for_master_password()
-            assert result == "pass1"
-
-    def test_prompt_for_master_password_cancel_confirm(self):
-        """用户在确认阶段取消"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.encryption_gui import prompt_for_master_password
-
-        with (
-            patch("gui.encryption_gui.QInputDialog.getText") as mock_get,
-            patch("gui.encryption_gui.QMessageBox.warning"),
-        ):
-            mock_get.side_effect = [
-                ("pass1", True),  # 第一次输入
-                ("", False),  # 确认时取消
-            ]
-            with pytest.raises(SystemExit):
-                prompt_for_master_password()
-
-    def test_confirm_reset_master_password_yes(self):
-        """用户确认重置"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from PyQt5.QtWidgets import QMessageBox
-
-        from gui.encryption_gui import confirm_reset_master_password
-
-        with patch("gui.encryption_gui.QMessageBox.question", return_value=QMessageBox.Yes):
-            result = confirm_reset_master_password("解密失败")
-            assert result is True
-
-    def test_confirm_reset_master_password_no(self):
-        """用户取消重置"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from PyQt5.QtWidgets import QMessageBox
-
-        from gui.encryption_gui import confirm_reset_master_password
-
-        with patch("gui.encryption_gui.QMessageBox.question", return_value=QMessageBox.No):
-            result = confirm_reset_master_password("解密失败")
-            assert result is False
-
-    def test_ensure_qapp_creates_instance(self):
-        """_ensure_qapp 在已有 QApplication 时返回"""
-        from gui.encryption_gui import _ensure_qapp
-
-        app = _ensure_qapp()
-        assert app is not None

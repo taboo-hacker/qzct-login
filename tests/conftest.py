@@ -43,15 +43,12 @@ def sample_config() -> dict:
 
 @pytest.fixture(autouse=True)
 def reset_global_config():
-    """每个测试前后重置全局配置状态（含 current_derived_key）"""
-    import core.config as cfg_module
+    """每个测试前后重置全局配置状态。"""
     from core.config import global_config
 
     original_config = global_config.snapshot()
-    original_key = cfg_module.current_derived_key
     yield
     global_config.replace_all(original_config)
-    cfg_module.current_derived_key = original_key
 
 
 @pytest.fixture

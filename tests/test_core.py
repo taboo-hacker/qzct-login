@@ -1,22 +1,13 @@
 """
 core 包模块测试
 
-测试加密模块、配置管理、日期判断等功能。
+测试配置管理、日期判断、农历等功能。
 """
 
 import datetime
-import os
-
-import pytest
 
 from core.config import ISP_MAPPING, get_config_snapshot, global_config
 from core.date_rules import should_work_today
-from core.encryption import (
-    decrypt_data,
-    encrypt_data,
-    generate_derived_key_from_master_password,
-    is_encrypted,
-)
 from core.lunar import LunarUtils
 
 
@@ -71,141 +62,6 @@ class TestLunarUtils:
         assert "solar_term" in result
         assert "festivals" in result
         assert "yi_ji" in result
-
-
-class TestEncryption:
-    """加密模块测试"""
-
-    def test_generate_derived_key_from_master_password(self):
-        """测试从主密码生成派生密钥"""
-        master_password = "test_password_123"
-        key, salt = generate_derived_key_from_master_password(master_password)
-
-        assert key is not None
-        assert salt is not None
-        assert len(salt) == 16
-        assert isinstance(key, bytes)
-
-    def test_generate_derived_key_deterministic(self):
-        """测试相同密码和盐值生成相同密钥"""
-        master_password = "test_password_123"
-        salt = os.urandom(16)
-
-        key1, _ = generate_derived_key_from_master_password(master_password, salt)
-        key2, _ = generate_derived_key_from_master_password(master_password, salt)
-
-        assert key1 == key2
-
-    def test_encrypt_decrypt_data(self):
-        """测试加密解密数据"""
-        master_password = "test_password_123"
-        key, _ = generate_derived_key_from_master_password(master_password)
-        original_data = "sensitive_password"
-
-        encrypted = encrypt_data(original_data, key)
-        decrypted = decrypt_data(encrypted, key)
-
-        assert encrypted != original_data
-        assert decrypted == original_data
-
-    def test_encrypt_empty_data(self):
-        """测试加密空数据"""
-        master_password = "test_password_123"
-        key, _ = generate_derived_key_from_master_password(master_password)
-
-        result = encrypt_data("", key)
-        assert result == ""
-
-    def test_decrypt_empty_data(self):
-        """测试解密空数据"""
-        master_password = "test_password_123"
-        key, _ = generate_derived_key_from_master_password(master_password)
-
-        result = decrypt_data("", key)
-        assert result == ""
-
-    def test_is_encrypted_true(self):
-        """测试判断已加密数据"""
-        master_password = "test_password_123"
-        key, _ = generate_derived_key_from_master_password(master_password)
-        encrypted = encrypt_data("test_data", key)
-
-        assert is_encrypted(encrypted) is True
-
-    def test_is_encrypted_false(self):
-        """测试判断未加密数据"""
-        plain_text = "plain_text_password"
-        assert is_encrypted(plain_text) is False
-
-    def test_is_encrypted_empty(self):
-        """测试判断空数据"""
-        assert is_encrypted("") is False
-        assert is_encrypted(None) is False
-
-    def test_decrypt_with_wrong_key(self):
-        """测试使用错误密钥解密"""
-        key1, _ = generate_derived_key_from_master_password("password1")
-        key2, _ = generate_derived_key_from_master_password("password2")
-
-        encrypted = encrypt_data("secret_data", key1)
-
-        from cryptography.fernet import InvalidToken
-
-        with pytest.raises(InvalidToken):
-            decrypt_data(encrypted, key2)
-
-
-class TestEncryptionEdgeCases:
-    """加密模块边界和异常路径测试"""
-
-    @pytest.mark.parametrize("data", ["", None])
-    def test_encrypt_decrypt_empty(self, data):
-        from core.encryption import decrypt_data, encrypt_data
-
-        key, _ = generate_derived_key_from_master_password("test_pass")
-        assert encrypt_data(data, key) == data
-        assert decrypt_data(data, key) == data
-
-    def test_decrypt_invalid_base64(self):
-        import binascii
-
-        from cryptography.fernet import InvalidToken
-
-        from core.encryption import decrypt_data
-
-        key, _ = generate_derived_key_from_master_password("test_pass")
-        with pytest.raises((binascii.Error, InvalidToken)):
-            decrypt_data("not_valid_base64!!!", key)
-
-    def test_decrypt_tampered_data(self):
-        from core.encryption import decrypt_data, encrypt_data
-
-        key, _ = generate_derived_key_from_master_password("test_pass")
-        encrypted = encrypt_data("secret_data", key)
-        # 篡改加密数据
-        tampered = encrypted[:-5] + "XXXXX"
-        from cryptography.fernet import InvalidToken
-
-        with pytest.raises(InvalidToken):
-            decrypt_data(tampered, key)
-
-    @pytest.mark.parametrize(
-        "data,expected",
-        [
-            ("normal_string", False),
-            ("", False),
-            (None, False),
-            (123, False),
-            # 旧格式启发式判断已移除，无 ENC: 前缀一律视为未加密
-            ("Z0EAAAAAAAAAAAAAAAAAAAAAAAAA", False),
-            # 新格式：ENC: 前缀视为已加密
-            ("ENC:Z0EAAAAAAAAAAAAAAAAAAAAAAAAA", True),
-        ],
-    )
-    def test_is_encrypted_parametrized(self, data, expected):
-        from core.encryption import is_encrypted
-
-        assert is_encrypted(data) == expected
 
 
 class TestConfigManagement:

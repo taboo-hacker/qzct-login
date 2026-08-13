@@ -34,6 +34,4 @@ CAMPUS_LOGIN_HEADERS = {
 # ==========================================
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".qzct")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
-KEY_FILE = os.path.join(CONFIG_DIR, "encryption_key.key")
-SALT_FILE = os.path.join(CONFIG_DIR, "encryption_salt.key")
 LOG_FILE = os.path.join(CONFIG_DIR, "qzct.log")

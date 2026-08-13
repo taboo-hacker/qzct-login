@@ -12,6 +12,28 @@ from typing import Any
 from loguru import logger
 
 
+def _restrict_file_permissions(filepath: str) -> None:
+    """限制文件权限，使其仅当前用户可读写（Windows: icacls，POSIX: chmod 600）。
+
+    失败不阻断日志初始化。
+    """
+    try:
+        if sys.platform == "win32":
+            import getpass
+            import subprocess
+
+            subprocess.run(
+                ["icacls", filepath, "/inheritance:r", "/grant:r", f"{getpass.getuser()}:F"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        else:
+            os.chmod(filepath, 0o600)
+    except Exception:
+        pass
+
+
 def setup_logger(
     gui_widget: Any = None,
     log_file: str | None = None,
@@ -65,12 +87,7 @@ def setup_logger(
         if not os.path.exists(log_file):
             with open(log_file, "a", encoding="utf-8"):
                 pass
-        try:
-            from core.encryption import _restrict_file_permissions
-
-            _restrict_file_permissions(log_file)
-        except Exception:
-            pass  # 权限限制失败不阻断日志初始化
+        _restrict_file_permissions(log_file)
 
         logger.add(
             log_file,

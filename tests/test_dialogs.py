@@ -1,7 +1,7 @@
 """
 gui/dialogs/* 补充测试
 
-覆盖 PeriodEditDialog, PasswordDialog, AboutDialog, SettingsDialog。
+覆盖 PeriodEditDialog, AboutDialog, SettingsDialog。
 """
 
 from PyQt5.QtWidgets import QApplication
@@ -84,118 +84,6 @@ class TestPeriodEditDialog:
         with patch("gui.dialogs.period_edit_dialog.QMessageBox.warning"):
             dialog.save()
         assert dialog.result_period is None
-
-
-class TestChangeMasterPasswordDialog:
-    """ChangeMasterPasswordDialog 测试"""
-
-    def test_constructs(self, qtbot):
-        _ensure_qapp()
-        from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
-
-        dialog = ChangeMasterPasswordDialog()
-        qtbot.addWidget(dialog)
-        assert dialog.windowTitle() == "更改主密码"
-        assert dialog.old_password_edit is not None
-        assert dialog.new_password_edit is not None
-        assert dialog.confirm_password_edit is not None
-
-    def test_change_empty_old(self, qtbot):
-        """空旧密码不执行"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
-
-        dialog = ChangeMasterPasswordDialog()
-        qtbot.addWidget(dialog)
-        dialog.old_password_edit.setText("")
-        with (
-            patch("gui.dialogs.password_dialog.QMessageBox.warning") as mock_warning,
-            patch("core.config.change_master_password") as mock_change,
-        ):
-            dialog.change_password()
-            mock_warning.assert_called_once()
-            mock_change.assert_not_called()
-
-    def test_change_empty_new(self, qtbot):
-        """空新密码不执行"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
-
-        dialog = ChangeMasterPasswordDialog()
-        qtbot.addWidget(dialog)
-        dialog.old_password_edit.setText("oldpass")
-        dialog.new_password_edit.setText("")
-        with (
-            patch("gui.dialogs.password_dialog.QMessageBox.warning") as mock_warning,
-            patch("core.config.change_master_password") as mock_change,
-        ):
-            dialog.change_password()
-            mock_warning.assert_called_once()
-            mock_change.assert_not_called()
-
-    def test_change_mismatch(self, qtbot):
-        """两次新密码不一致"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
-
-        dialog = ChangeMasterPasswordDialog()
-        qtbot.addWidget(dialog)
-        dialog.old_password_edit.setText("oldpass")
-        dialog.new_password_edit.setText("newpass1")
-        dialog.confirm_password_edit.setText("newpass2")
-        with (
-            patch("gui.dialogs.password_dialog.QMessageBox.warning") as mock_warning,
-            patch("core.config.change_master_password") as mock_change,
-        ):
-            dialog.change_password()
-            mock_warning.assert_called_once()
-            mock_change.assert_not_called()
-
-    def test_change_success(self, qtbot):
-        """更改成功"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
-
-        dialog = ChangeMasterPasswordDialog()
-        qtbot.addWidget(dialog)
-        dialog.old_password_edit.setText("oldpass")
-        dialog.new_password_edit.setText("newpass")
-        dialog.confirm_password_edit.setText("newpass")
-
-        with (
-            patch("core.config.change_master_password", return_value=True),
-            patch("gui.dialogs.password_dialog.QMessageBox.information"),
-        ):
-            dialog.change_password()
-        assert dialog.result() == 1  # Accepted
-
-    def test_change_failure(self, qtbot):
-        """更改失败"""
-        _ensure_qapp()
-        from unittest.mock import patch
-
-        from gui.dialogs.password_dialog import ChangeMasterPasswordDialog
-
-        dialog = ChangeMasterPasswordDialog()
-        qtbot.addWidget(dialog)
-        dialog.old_password_edit.setText("wrongpass")
-        dialog.new_password_edit.setText("newpass")
-        dialog.confirm_password_edit.setText("newpass")
-
-        with (
-            patch("core.config.change_master_password", return_value=False),
-            patch("gui.dialogs.password_dialog.QMessageBox.critical"),
-        ):
-            dialog.change_password()
-        assert dialog.result() == 0  # Rejected
 
 
 class TestAboutDialog:
@@ -302,20 +190,6 @@ class TestSettingsDialog:
         dialog.toggle_password_visibility(edit, btn)
         assert edit.echoMode() == QLineEdit.EchoMode.Password
         assert btn.text() == "显示"
-
-    def test_is_password_placeholder(self, qtbot):
-        _ensure_qapp()
-        from core.config import DEFAULT_CONFIG
-
-        global_config.clear()
-        global_config.update(DEFAULT_CONFIG)
-
-        from gui.dialogs.settings_dialog import _DECRYPT_FAILED_PLACEHOLDER, SettingsDialog
-
-        dialog = SettingsDialog()
-        qtbot.addWidget(dialog)
-        assert dialog._is_password_placeholder(_DECRYPT_FAILED_PLACEHOLDER) is True
-        assert dialog._is_password_placeholder("actual_password") is False
 
     def test_on_theme_changed(self, qtbot):
         _ensure_qapp()

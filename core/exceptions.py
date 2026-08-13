@@ -103,33 +103,6 @@ class ConfigValidationError(ConfigError):
 
 
 # ==========================================
-# 加密相关异常
-# ==========================================
-class EncryptionError(QZCTError):
-    """加密相关异常"""
-
-    pass
-
-
-class EncryptionKeyError(EncryptionError):
-    """加密密钥异常"""
-
-    pass
-
-
-class DecryptionError(EncryptionError):
-    """解密失败异常"""
-
-    pass
-
-
-class MasterPasswordError(EncryptionError):
-    """主密码异常"""
-
-    pass
-
-
-# ==========================================
 # 任务相关异常
 # ==========================================
 class TaskError(QZCTError):
