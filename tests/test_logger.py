@@ -26,6 +26,15 @@ class TestSetupLogger:
         setup_logger()
         # 验证没有崩溃即可——stderr handler 已添加
 
+    def test_skips_stderr_sink_when_none(self, tmp_path, monkeypatch):
+        """打包模式（console=False）下 sys.stderr 为 None 时不崩溃（回归）"""
+        from utils.logger import setup_logger
+
+        monkeypatch.setattr("sys.stderr", None)
+        log_file = str(tmp_path / "qzct.log")
+        result = setup_logger(log_file=log_file, level="INFO")
+        assert result is not None
+
     def test_adds_file_handler(self, tmp_path):
         """指定 log_file 时添加文件 handler"""
         from utils.logger import setup_logger

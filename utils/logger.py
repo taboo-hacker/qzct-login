@@ -99,7 +99,10 @@ def setup_logger(
             encoding="utf-8",
         )
 
-    logger.add(sys.stderr, level=level, format=terminal_format, colorize=True)
+    # 打包模式（PyInstaller console=False）下 sys.stderr 为 None，
+    # 此时跳过终端 sink（loguru 不接受 None 流）
+    if sys.stderr is not None:
+        logger.add(sys.stderr, level=level, format=terminal_format, colorize=True)
 
     logger.info("日志系统初始化完成 [Loguru]")
     return logger
