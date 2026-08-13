@@ -7,7 +7,7 @@ concurrency.py 模块测试
 import threading
 import time
 
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication
 
 from infra.concurrency import (
     CHAIN_BREAK_KEY,

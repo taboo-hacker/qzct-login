@@ -4,7 +4,7 @@
 将 MainWindow 中的系统托盘逻辑封装为独立组件。
 """
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QMenu,
     QStyle,
@@ -34,7 +34,7 @@ class TrayManager:
     def _setup(self) -> None:
         style = QApplication.style()
         assert style is not None
-        icon = style.standardIcon(QStyle.SP_ComputerIcon)  # type: ignore[attr-defined]
+        icon = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
         self._tray_icon = QSystemTrayIcon(icon, self._parent)
         self._tray_icon.setToolTip("校园网自动登录")
 
@@ -65,12 +65,12 @@ class TrayManager:
             self._tray_icon.showMessage(
                 title,
                 message,
-                QSystemTrayIcon.Information,  # type: ignore[attr-defined]
+                QSystemTrayIcon.MessageIcon.Information,
                 3000,
             )
 
-    def _on_activated(self, reason: int) -> None:
-        if reason == QSystemTrayIcon.DoubleClick:  # type: ignore[attr-defined]
+    def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_window()
 
     def _on_quit(self) -> None:

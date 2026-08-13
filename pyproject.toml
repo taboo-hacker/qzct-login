@@ -1,6 +1,6 @@
 [project]
 name = "qzct-login"
-version = "1.4.1"
+version = "1.5.0"
 description = "校园网自动登录 + 定时关机工具"
 readme = "README.md"
 license = {text = "LICENSE"}
@@ -8,7 +8,7 @@ requires-python = ">=3.10"
 authors = [
     {name = "QZCT Developer"}
 ]
-keywords = ["校园网", "自动登录", "定时关机", "PyQt5"]
+keywords = ["校园网", "自动登录", "定时关机", "PySide6"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "PyQt5>=5.15.0,<6.0.0",
+    "PySide6>=6.6.0,<7.0.0",
     "requests>=2.25.0,<3.0.0",
     "lunar-python>=1.0.0,<2.0.0",
     "chinesecalendar>=1.0.0,<2.0.0",
@@ -92,7 +92,7 @@ exclude = '''
 profile = "black"
 line_length = 100
 known_first_party = ["core", "infra", "services", "gui", "utils"]
-known_third_party = ["PyQt5", "requests", "lunar_python", "loguru"]
+known_third_party = ["PySide6", "requests", "lunar_python", "loguru"]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 skip_gitignore = true
 
@@ -148,7 +148,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
-    "PyQt5.*",
+    "PySide6.*",
     "lunar_python.*",
 ]
 ignore_missing_imports = true
@@ -159,9 +159,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-# 环境若同时安装 PyQt5 与 PyQt6，pytest-qt 会优先检测 PyQt6，
-# 与项目代码的 PyQt5 冲突导致跨线程信号失效；强制使用 PyQt5。
-qt_api = "pyqt5"
+# 强制 pytest-qt 使用 PySide6（避免环境混装多套 Qt 绑定时选错）
+qt_api = "pyside6"
 addopts = [
     "-v",
     "--tb=short",
@@ -173,9 +172,9 @@ markers = [
     "gui: marks tests that require GUI",
 ]
 filterwarnings = [
-    "ignore::DeprecationWarning:PyQt5",
+    "ignore::DeprecationWarning:PySide6",
     "ignore::DeprecationWarning:_pytest",
-    "ignore::PendingDeprecationWarning:PyQt5",
+    "ignore::PendingDeprecationWarning:PySide6",
 ]
 
 # ============================================

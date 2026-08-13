@@ -6,7 +6,7 @@
 2. QFont 设置使用 FontStyle.normal/bold()
 """
 
-from PyQt5.QtGui import QFont
+from PySide6.QtGui import QFont
 
 
 class FontSize:

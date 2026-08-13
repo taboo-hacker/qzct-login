@@ -8,8 +8,8 @@ SettingsDialog 是其对话框包装。修改后点击"保存配置"生效，
 
 from collections.abc import Callable
 
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -40,9 +40,9 @@ class SettingsPanel(QWidget):
     """配置设置面板（嵌入主窗口标签页）。"""
 
     # 配置保存成功后发出（主窗口据此刷新状态显示）
-    config_saved = pyqtSignal()
+    config_saved = Signal()
     # 主题即时切换后发出（主窗口据此刷新万年历视图）
-    theme_changed = pyqtSignal(str)
+    theme_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

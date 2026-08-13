@@ -7,9 +7,9 @@
 
 import html
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QCursor, QFont
-from PyQt5.QtWidgets import QFrame, QLabel, QPushButton, QTextEdit, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCursor, QFont
+from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QTextEdit, QWidget
 
 from gui.styling.constants import FontSize, FontStyle
 from gui.styling.theme_manager import ThemeManager

@@ -2,7 +2,7 @@
 gui/styling/widgets.py + theme_manager.py 补充测试
 """
 
-from PyQt5.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel
 
 from gui.styling.theme_manager import ThemeManager
 from gui.styling.themes import ThemeColors, create_light_theme
@@ -97,7 +97,7 @@ class TestCreateCardWidget:
         _ensure_qapp()
         card = create_card_widget()
         assert card is not None
-        from PyQt5.QtWidgets import QFrame
+        from PySide6.QtWidgets import QFrame
 
         assert isinstance(card, QFrame)
 

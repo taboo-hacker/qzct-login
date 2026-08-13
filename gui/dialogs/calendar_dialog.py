@@ -5,7 +5,7 @@ CalendarDialog 为 CalendarView 的对话框包装（保留给独立使用场景
 主窗口内已改用嵌入式标签页，不再弹窗。
 """
 
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
 
 from gui.widgets.calendar_view import CalendarView
 

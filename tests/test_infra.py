@@ -2,7 +2,7 @@
 infra 包模块测试
 
 测试工具函数、日志系统等功能。
-线程池管理测试已移至 test_gui.py（因依赖 PyQt5）。
+线程池管理测试已移至 test_gui.py（因依赖 PySide6）。
 """
 
 import datetime

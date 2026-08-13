@@ -3,9 +3,8 @@ import sys
 import traceback
 from types import TracebackType
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QApplication
 
 from core.config import global_config
 
@@ -42,10 +41,7 @@ def main() -> None:
 
     sys.excepthook = _excepthook
 
-    # 启用高 DPI 缩放
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
-
+    # 高 DPI 缩放由 Qt6 默认启用，无需额外设置
     app = QApplication.instance()
     if not app:
         app = QApplication(sys.argv)
