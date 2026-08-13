@@ -16,7 +16,8 @@
 
 QZCT 校园登录助手是一款专为衢州职业技术学院校园网设计的自动化登录工具。基于 PySide6（Qt for Python，LGPL 许可）开发，采用极简商务风界面，支持 WiFi 自动连接、校园网认证、定时关机等核心功能。
 
-⚡ 本项目采用 AI 辅助开发：通过 DeepSeek Harness（DSH）接入 DeepSeek API，由 AI 智能体完成代码审查、UI 重构与测试验证，实践 Agentic Coding 开发理念。
+💻 本项目最初由开发者逐行手写完成。
+⚡ 后期通过 DeepSeek Harness（DSH）接入 DeepSeek API，由 AI 智能体进行代码审查、重构优化与版本迭代维护，实践 Agentic Coding（智能体编程）开发理念。
 
 ## ✨ 功能特性
 
