@@ -63,17 +63,23 @@ class MainWindow(QMainWindow):
         self._force_quit = False
         self._task_chain_started: bool = False
 
-        # 基础 UI（日志组件在初始化阶段就创建好，供日志系统使用）
+        # 日志组件先创建，供日志系统使用
         self.log_text = LogTextEdit()
-        self._init_ui()
 
         # 初始化日志（日志文件落盘到 ~/.qzct/qzct.log，5MB 轮转×5）
         init_logger(gui_log_widget=self.log_text, log_file_path=LOG_FILE, level=1)
 
-        # 加载配置后应用保存的主题（全局 QSS 重绘）并刷新状态显示
+        # 必须先加载配置并应用保存的主题，再构建界面：
+        # 设置面板/状态显示在构建时读取 global_config，顺序颠倒会导致
+        # 面板显示默认空值，保存时把空值写回、覆盖已保存的配置
         load_config()
-        self._apply_saved_theme()
-        self._update_status_display()
+        ThemeManager.set_theme(str(global_config.get("THEME", "light")))
+
+        # 构建界面（此时 global_config 已是加载后的值）
+        self._init_ui()
+
+        # 万年历视图使用调色板/内联色，需按当前主题刷新一次
+        self._calendar_view.update_theme()
 
         # 重定向输出
         self._original_stdout = sys.stdout
@@ -99,13 +105,6 @@ class MainWindow(QMainWindow):
         self._timer.start(1000)
 
         info("main", "主窗口初始化完成")
-
-    def _apply_saved_theme(self) -> None:
-        """应用配置中保存的主题（在 load_config 之后调用，触发全局 QSS 重绘）。"""
-        theme_name = str(global_config.get("THEME", "light"))
-        ThemeManager.set_theme(theme_name)
-        # 万年历视图使用调色板/内联色，需要单独刷新
-        self._calendar_view.update_theme()
 
     # ------------------------------------------------------------------
     # UI 构建

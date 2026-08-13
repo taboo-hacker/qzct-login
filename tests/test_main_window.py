@@ -59,6 +59,51 @@ class TestMainWindowSmoke:
             if window is not None:
                 window.deleteLater()
 
+    def test_settings_panel_reflects_loaded_config(self, qtbot, tmp_path, monkeypatch):
+        """设置面板显示加载后的配置值（回归：曾因构建顺序颠倒显示默认空值）"""
+        _ensure_qapp()
+        import json
+        from unittest.mock import patch
+
+        import core.config as cfg_module
+
+        monkeypatch.setattr(cfg_module, "CONFIG_DIR", str(tmp_path))
+        monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(tmp_path / "config.json"))
+        (tmp_path / "config.json").write_text(
+            json.dumps(
+                {
+                    "WIFI_NAME": "DormWiFi",
+                    "USERNAME": "20230101",
+                    "SHUTDOWN_HOUR": 22,
+                    "SHUTDOWN_MIN": 30,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        from gui.main_window import MainWindow
+
+        original_out, original_err = sys.stdout, sys.stderr
+        window = None
+        try:
+            with (
+                patch("gui.main_window.init_logger"),
+                patch("gui.main_window.TrayManager"),
+            ):
+                window = MainWindow()
+                window._task_chain_started = True
+                window._timer.stop()
+
+                panel = window._settings_panel
+                assert panel.wifi_name_edit.text() == "DormWiFi"
+                assert panel.username_edit.text() == "20230101"
+                assert panel.shutdown_hour_edit.text() == "22"
+                assert panel.shutdown_min_edit.text() == "30"
+        finally:
+            sys.stdout, sys.stderr = original_out, original_err
+            if window is not None:
+                window.deleteLater()
+
     def test_status_badge_state_reflects_need_work(self, qtbot):
         """状态徽标 state 属性随需执行状态变化"""
         _ensure_qapp()
