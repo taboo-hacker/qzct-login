@@ -60,6 +60,14 @@ def main() -> None:
     from gui.main_window import MainWindow
 
     window = MainWindow()
+
+    # 单实例：若已有实例在运行，通知其显示主窗口并退出本进程
+    from utils.single_instance import listen_single_instance
+
+    _single_server = listen_single_instance(window.show_from_tray)
+    if _single_server is None:
+        return
+
     window.show()
 
     # 允许 Ctrl+C 在终端中干净退出

@@ -13,6 +13,7 @@ from typing import Any
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -564,6 +565,13 @@ class MainWindow(QMainWindow):
     # 窗口关闭
     # ------------------------------------------------------------------
 
+    def show_from_tray(self) -> None:
+        """显示并激活主窗口（供托盘双击/单实例通知调用）。"""
+        self.showNormal()
+        self.activateWindow()
+        self.raise_()
+        info("main", "已显示主窗口")
+
     def _real_close(self) -> None:
         self._force_quit = True
         self.close()
@@ -608,3 +616,10 @@ class MainWindow(QMainWindow):
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
         event.accept()
+
+        # 窗口处于隐藏（托盘驻留）状态时，接受关闭不会触发 lastWindowClosed
+        # （Qt 只对可见窗口计数），需显式退出事件循环——修复托盘"退出"
+        # 在窗口隐藏时无效的问题
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(0, app.quit)
