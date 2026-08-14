@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.5.1](https://img.shields.io/badge/Version-1.5.1-blue.svg)](pyproject.toml)
+[![Version: 1.5.2](https://img.shields.io/badge/Version-1.5.2-blue.svg)](pyproject.toml)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -123,7 +123,7 @@ qzct-login/
 ├── utils/
 │   ├── version.py              # 版本管理
 │   └── logger.py               # 日志工具（Loguru 配置）
-├── tests/                      # 测试模块（296 个测试用例）
+├── tests/                      # 测试模块（299 个测试用例）
 ├── .github/
 │   └── workflows/              # GitHub Actions (CI + Release)
 ├── pyproject.toml              # 项目配置
@@ -138,6 +138,13 @@ qzct-login/
 - [代码 Wiki](CODE_WIKI.md) - 项目架构和 API 文档
 
 ## 🔄 更新日志
+
+### v1.5.2 (2026-08-13)
+
+- 🐛 修复：打包版（无控制台模式）启动崩溃——sys.stderr 为 None 时日志初始化跳过终端输出
+- ✨ 新增单实例运行：重复启动直接唤起已运行实例的主窗口，不再多开进程（QLocalServer 本地管道）
+- 🐛 修复：窗口最小化到托盘后，托盘菜单"退出"无效——关闭后显式退出事件循环
+- 🧪 测试用例扩充至 299 个（298 通过 + 1 跳过），新增单例机制回归测试
 
 ### v1.5.1 (2026-08-13)
 
