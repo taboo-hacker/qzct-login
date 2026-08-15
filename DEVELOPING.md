@@ -167,16 +167,16 @@ pytest tests/ -q --cov --cov-fail-under=70
 
 ## 代码签名
 
-构建脚本会自动使用当前用户证书库（`Cert:\CurrentUser\My`）中的 QZCT 代码签名证书
-对 exe 签名（SHA256 + DigiCert 时间戳），并把 `qzct-signing-cert.cer` 与
-`安装签名证书.bat` 复制到 `dist/` 随包分发。
+构建脚本会自动使用当前用户证书库（`Cert:\CurrentUser\My`）中 taboo-hacker 的
+个人身份代码签名证书（全项目通用）对 exe 签名（SHA256 + DigiCert 时间戳），
+并把 `taboo-hacker-signing-cert.cer` 与 `安装签名证书.bat` 复制到 `dist/` 随包分发。
 
 - 证书生成（一次性）：
-  `New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=QZCT Developer' -NotAfter (Get-Date).AddYears(10) -KeyExportPolicy Exportable -CertStoreLocation 'Cert:\CurrentUser\My'`
+  `New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=taboo-hacker' -NotAfter (Get-Date).AddYears(10) -KeyExportPolicy Exportable -CertStoreLocation 'Cert:\CurrentUser\My'`
 - 指纹可通过环境变量 `QZCT_CODE_SIGN_THUMBPRINT` 指定；不指定则自动按主题名查找
 - 自签名证书链不受系统信任，`Get-AuthenticodeSignature` 状态显示 `UnknownError` 属正常，
   构建脚本按"签名存在 + 签名者指纹匹配"判定签名成功
-- 用户侧：安装一次 `qzct-signing-cert.cer` 到"受信任的发布者"（双击 `安装签名证书.bat`），
+- 用户侧：安装一次 `taboo-hacker-signing-cert.cer` 到"受信任的发布者"（双击 `安装签名证书.bat`），
   此后该证书签名的所有 exe 不再提示"未知发布者"
 - 私钥仅存在于本机证书库，切勿把可导出私钥的 PFX 分发给他人
 

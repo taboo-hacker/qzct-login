@@ -33,7 +33,7 @@ EXE_PATH = DIST_DIR / EXE_NAME
 # 代码签名（可选）：证书存放在当前用户的证书库（Cert:\CurrentUser\My），
 # 指纹可通过环境变量 QZCT_CODE_SIGN_THUMBPRINT 指定；未指定时自动按主题名查找
 SIGNING_DIR = Path.home() / "qzct-signing"
-CERT_FILE = SIGNING_DIR / "qzct-signing-cert.cer"
+CERT_FILE = SIGNING_DIR / "taboo-hacker-signing-cert.cer"
 INSTALL_SCRIPT = SIGNING_DIR / "安装签名证书.bat"
 TIMESTAMP_URL = "http://timestamp.digicert.com"
 
@@ -107,13 +107,13 @@ def _run_powershell(script: str) -> str:
 
 
 def _find_signing_thumbprint() -> str | None:
-    """查找签名证书指纹：优先环境变量，其次自动查找 QZCT 证书。"""
+    """查找签名证书指纹：优先环境变量，其次自动查找 taboo-hacker 证书。"""
     thumbprint = os.environ.get("QZCT_CODE_SIGN_THUMBPRINT", "").strip()
     if thumbprint:
         return thumbprint
     script = (
         r"Get-ChildItem Cert:\CurrentUser\My | "
-        "Where-Object { $_.Subject -like '*QZCT*' -and $_.HasPrivateKey } | "
+        "Where-Object { $_.Subject -like '*taboo-hacker*' -and $_.HasPrivateKey } | "
         "Select-Object -First 1 -ExpandProperty Thumbprint"
     )
     found = _run_powershell(script)
@@ -154,7 +154,7 @@ def sign_exe() -> bool:
     if signer_thumbprint.strip().upper() != thumbprint.strip().upper():
         print(f"[ERROR] 签名者指纹不匹配：{signer_thumbprint}", file=sys.stderr)
         return False
-    print(f"[签名] 签名完成，状态: {status}（签名者: QZCT Developer）")
+    print(f"[签名] 签名完成，状态: {status}（签名者: taboo-hacker）")
 
     # 随 exe 一起分发：公开证书 + 用户一键安装脚本
     for src in (CERT_FILE, INSTALL_SCRIPT):
