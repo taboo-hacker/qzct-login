@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.5.2](https://img.shields.io/badge/Version-1.5.2-blue.svg)](pyproject.toml)
+[![Version: 1.5.3](https://img.shields.io/badge/Version-1.5.3-blue.svg)](pyproject.toml)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -138,6 +138,11 @@ qzct-login/
 - [代码 Wiki](CODE_WIKI.md) - 项目架构和 API 文档
 
 ## 🔄 更新日志
+
+### v1.5.3 (2026-08-15)
+
+- ✨ 构建脚本集成代码签名：自动使用 QZCT 代码签名证书对 exe 签名（SHA256 + 时间戳），随包分发公开证书与一键安装脚本
+- 🔧 修复：构建脚本在 PowerShell 模块路径被污染时无法读取证书库（优先 pwsh + 清理 PSModulePath）
 
 ### v1.5.2 (2026-08-14)
 

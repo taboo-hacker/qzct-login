@@ -165,9 +165,25 @@ pytest tests/ -q --cov --cov-fail-under=70
 
 `~/.qzct/config.json`，明文 JSON。旧版加密数据（ENC: 前缀）加载时自动清空，需重新填写。
 
+## 代码签名
+
+构建脚本会自动使用当前用户证书库（`Cert:\CurrentUser\My`）中的 QZCT 代码签名证书
+对 exe 签名（SHA256 + DigiCert 时间戳），并把 `qzct-signing-cert.cer` 与
+`安装签名证书.bat` 复制到 `dist/` 随包分发。
+
+- 证书生成（一次性）：
+  `New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=QZCT Developer' -NotAfter (Get-Date).AddYears(10) -KeyExportPolicy Exportable -CertStoreLocation 'Cert:\CurrentUser\My'`
+- 指纹可通过环境变量 `QZCT_CODE_SIGN_THUMBPRINT` 指定；不指定则自动按主题名查找
+- 自签名证书链不受系统信任，`Get-AuthenticodeSignature` 状态显示 `UnknownError` 属正常，
+  构建脚本按"签名存在 + 签名者指纹匹配"判定签名成功
+- 用户侧：安装一次 `qzct-signing-cert.cer` 到"受信任的发布者"（双击 `安装签名证书.bat`），
+  此后该证书签名的所有 exe 不再提示"未知发布者"
+- 私钥仅存在于本机证书库，切勿把可导出私钥的 PFX 分发给他人
+
 ## 发布流程
 
 1. 更新 `pyproject.toml` 版本号、README 徽章与更新日志
-2. 全量验证（上面的提交前检查）后提交并推送 master
-3. 在 GitHub 发布 Release（触发 `.github/workflows/release.yml` 构建 exe/wheel），
+2. 全量验证（上面的提交前检查）后提交并推送 master（origin + github 两个远端）
+3. `python build.py --clean --verify` 构建并签名 exe
+4. 在 GitHub 发布 Release（触发 `.github/workflows/release.yml` 构建 exe/wheel），
    或手动触发 workflow_dispatch
