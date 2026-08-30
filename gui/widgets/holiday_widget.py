@@ -3,7 +3,8 @@
 
 设置页"节假日"标签页的主体：以表格形式编辑 HOLIDAY_PERIODS 配置
 （国务院法定假日 + 学校寒暑假），基于 BaseListEditorWidget 骨架实现。
-数据在点击"保存配置"时经 save_holidays() 写回 global_config。
+数据在点击"保存配置"时经 save_holidays() 返回给 SettingsPanel，
+与其余字段统一收集、校验后一次性写入（保存事务性）。
 """
 
 import copy

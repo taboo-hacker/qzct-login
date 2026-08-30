@@ -61,8 +61,10 @@ def main() -> None:
 
     # 高 DPI 缩放由 Qt6 默认启用，无需额外设置
     app = QApplication.instance()
-    if not app:
+    if app is None:
         app = QApplication(sys.argv)
+    # instance() 静态返回 QCoreApplication，收窄回 QApplication 才有 setFont 等 API
+    assert isinstance(app, QApplication)
 
     app.setApplicationName("校园网自动登录")
     app.setOrganizationName("QZCT")

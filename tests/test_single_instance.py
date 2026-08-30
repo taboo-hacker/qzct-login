@@ -11,7 +11,8 @@ from PySide6.QtWidgets import QApplication
 
 def _ensure_qapp() -> QApplication:
     """模块级辅助函数：确保进程中存在 QApplication 实例（QLocalServer 依赖事件循环处理连接）。"""
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance()
+    return app if isinstance(app, QApplication) else QApplication([])
 
 
 class TestSingleInstance:

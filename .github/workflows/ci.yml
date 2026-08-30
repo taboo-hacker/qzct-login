@@ -42,7 +42,8 @@ jobs:
         run: ruff check --output-format=github .
 
       - name: MyPy 类型检查
-        run: mypy --ignore-missing-imports core infra services gui utils main.py
+        # tests/ 已全量补齐类型注解，全仓检查（PySide6 随包安装，存根真实生效）
+        run: mypy .
 
   security:
     name: 安全扫描

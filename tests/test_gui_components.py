@@ -15,7 +15,8 @@ from gui.log_sink import QtLogSink
 
 def _ensure_qapp() -> QApplication:
     """模块级辅助函数：确保 QApplication 实例存在（托盘/信号机制依赖）。"""
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance()
+    return app if isinstance(app, QApplication) else QApplication([])
 
 
 # =====================================================================
@@ -125,6 +126,8 @@ class TestTrayManager:
         _ensure_qapp()
         from unittest.mock import patch
 
+        from PySide6.QtWidgets import QSystemTrayIcon
+
         from gui.tray_manager import TrayManager
 
         parent = QWidget()
@@ -132,24 +135,31 @@ class TestTrayManager:
 
         with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
             tm = TrayManager(parent)
-            tm._on_activated(0)  # Trigger
+            tm._on_activated(QSystemTrayIcon.ActivationReason.Trigger)
             assert not parent.isVisible()
 
     def test_on_quit_calls_real_close(self, qtbot: QtBot) -> None:
         """托盘菜单退出时应调用 parent.quit_application 完成真正的退出清理。"""
         _ensure_qapp()
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from gui.tray_manager import TrayManager
 
-        parent = QWidget()
+        class FakeMainWidget(QWidget):
+            """带 quit_application 契约方法的 MainWindow 测试替身。"""
+
+            quit_calls: int = 0
+
+            def quit_application(self) -> None:
+                self.quit_calls += 1
+
+        parent = FakeMainWidget()
         qtbot.addWidget(parent)
-        parent.quit_application = MagicMock()
 
         with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
             tm = TrayManager(parent)
             tm._on_quit()
-            parent.quit_application.assert_called_once()
+            assert parent.quit_calls == 1
 
     def test_on_quit_no_real_close(self, qtbot: QtBot) -> None:
         """parent 未提供 quit_application 时退出也不崩溃。"""
@@ -239,13 +249,10 @@ class TestQtLogSink:
     def test_write_without_gui_widget_buffers(self, qtbot: QtBot) -> None:
         """GUI 控件尚未创建（启动期）时 write() 应把日志暂存到缓冲列表。"""
         _ensure_qapp()
-        from PySide6.QtCore import QTimer
 
         sink = QtLogSink(None)
-        QtLogSink._flush_timer = QTimer()  # 模拟已设置 flush_timer
         sink.write("buffered msg\n")
         assert any("buffered msg" in log for log in QtLogSink._pending_logs)
-        QtLogSink._flush_timer = None  # 清理
 
     def test_flush_pending_logs(self, qtbot: QtBot) -> None:
         """_flush_pending_logs 应把缓冲日志写入 GUI 并清空缓冲。"""

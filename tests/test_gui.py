@@ -17,7 +17,8 @@ from gui.styling.themes import BUILTIN_THEMES, ThemeColors, create_dark_theme, c
 
 def _ensure_qapp() -> QApplication:
     """模块级辅助函数：确保存在 QApplication 实例（Qt 信号机制所必需）。"""
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance()
+    return app if isinstance(app, QApplication) else QApplication([])
 
 
 class TestThemeColors:

@@ -16,7 +16,8 @@ from pytestqt.qtbot import QtBot
 
 def _ensure_qapp() -> QApplication:
     """模块级辅助函数：确保 QApplication 实例存在（qtbot 之外的兜底初始化）。"""
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance()
+    return app if isinstance(app, QApplication) else QApplication([])
 
 
 class TestMainWindowSmoke:

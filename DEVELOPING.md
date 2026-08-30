@@ -58,10 +58,10 @@ ruff check .
 ### 类型检查（MyPy）
 
 ```bash
-mypy core infra services gui utils main.py
+mypy .
 ```
 
-> 与 CI 保持一致使用显式目录列表；`mypy .` 会扫描 tests 目录产生噪音。
+> tests/ 已全量补齐类型注解，`mypy .` 全仓通过（backup/ 构建目录已 exclude）。
 > PySide6 自带类型存根，类型检查是真实生效的（`warn_unused_ignores` 已开启）。
 
 ## 运行测试
@@ -125,7 +125,7 @@ qzct-login/
 ```bash
 black --check . && isort --check-only .
 ruff check .
-mypy core infra services gui utils main.py
+mypy .
 pytest tests/ -q --cov --cov-fail-under=70
 ```
 

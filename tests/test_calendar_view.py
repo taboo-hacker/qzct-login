@@ -27,7 +27,8 @@ if TYPE_CHECKING:
 
 def _ensure_qapp() -> QApplication:
     """模块级辅助函数：确保 QApplication 实例存在（控件渲染依赖）。"""
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance()
+    return app if isinstance(app, QApplication) else QApplication([])
 
 
 def _make_view(qtbot: QtBot) -> "CalendarView":
