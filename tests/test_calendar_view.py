@@ -63,9 +63,9 @@ class TestMarkExecutionDates:
         view.mark_execution_dates()
         # 新显示月份的月初/月中/月末都应有标记
         for day in (1, 15, 28):
-            assert _has_custom_format(
-                view.calendar, QDate(shown_year, shown_month, day)
-            ), f"{shown_year}-{shown_month}-{day} 翻页后未标记"
+            assert _has_custom_format(view.calendar, QDate(shown_year, shown_month, day)), (
+                f"{shown_year}-{shown_month}-{day} 翻页后未标记"
+            )
 
     def test_clears_stale_formats_from_other_months(self, qtbot, monkeypatch):
         """重标前清空全部历史格式：其他月份日期不应残留旧标记。"""

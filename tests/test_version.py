@@ -54,7 +54,9 @@ class TestGetProjectVersion:
         version_mod._cached_project_version = None
 
         # 模拟在一个没有 pyproject.toml 的目录
-        with (patch.object(version_mod.os.path, "exists", return_value=False),):
+        with (
+            patch.object(version_mod.os.path, "exists", return_value=False),
+        ):
             result = version_mod.get_project_version()
             assert result == "1.0.0"
 

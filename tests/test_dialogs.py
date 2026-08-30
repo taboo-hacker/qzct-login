@@ -222,9 +222,10 @@ class TestSettingsDialog:
 
         assert global_config.get("WIFI_NAME") == "NewWiFi"
         assert (tmp_path / "config.json").exists()
-        assert json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))[
-            "WIFI_NAME"
-        ] == "NewWiFi"
+        assert (
+            json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))["WIFI_NAME"]
+            == "NewWiFi"
+        )
         assert saved_signals == [True]
 
     def test_theme_selector(self, qtbot):
