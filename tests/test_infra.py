@@ -1,7 +1,7 @@
 """
 infra 包模块测试
 
-测试日期工具（parse_date_str / is_date_in_period / format_period）、
+测试日期工具（parse_date_str / is_date_in_period）、
 Logger 日志封装与 StreamRedirector 输出流重定向。
 通过 patch infra.logging.setup_logger 与 infra.logging.logger
 隔离真实日志输出。线程池管理测试已移至 test_gui.py（因依赖 PySide6）。
@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 from infra import (
     Logger,
     StreamRedirector,
-    format_period,
     init_logger,
     is_date_in_period,
     parse_date_str,
@@ -108,25 +107,6 @@ class TestIsDateInPeriod:
         result = is_date_in_period(check_date, period)
         assert result is False
 
-
-class TestFormatPeriod:
-    """format_period 测试：期间字典转可读字符串。"""
-
-    def test_format_period_full(self):
-        """含 name 的期间格式化后应包含名称与起止日期。"""
-        period = {"name": "寒假", "start": "2026-01-10", "end": "2026-02-28"}
-        result = format_period(period)
-
-        assert "寒假" in result
-        assert "2026-01-10" in result
-        assert "2026-02-28" in result
-
-    def test_format_period_no_name(self):
-        """缺失 name 字段时应显示默认名"未命名"。"""
-        period = {"start": "2026-01-01", "end": "2026-01-31"}
-        result = format_period(period)
-
-        assert "未命名" in result
 
 
 class TestLogger:

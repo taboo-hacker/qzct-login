@@ -5,9 +5,19 @@
 """
 
 import datetime
+from functools import lru_cache
 from typing import Any
 
 PeriodDict = dict[str, Any]
+
+
+@lru_cache(maxsize=512)
+def _parse_date_str_cached(date_str: str) -> datetime.date | None:
+    """解析 "YYYY-MM-DD" 字符串为 date；失败返回 None（缓存加速逐日重判）。"""
+    try:
+        return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def parse_date_str(date_str: str | None) -> datetime.date | None:
@@ -15,6 +25,8 @@ def parse_date_str(date_str: str | None) -> datetime.date | None:
     解析日期字符串为 date 对象
 
     将 "YYYY-MM-DD" 格式的字符串转换为 Python datetime.date 对象。
+    结果按输入字符串缓存（万年历逐日判定会反复解析同一批配置日期，
+    缓存后每次调用只做字典查找）。
 
     Args:
         date_str: 日期字符串，格式为 "YYYY-MM-DD"
@@ -31,10 +43,7 @@ def parse_date_str(date_str: str | None) -> datetime.date | None:
     """
     if date_str is None:
         return None
-    try:
-        return datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-    except (ValueError, TypeError, AttributeError):
-        return None
+    return _parse_date_str_cached(date_str)
 
 
 def is_date_in_period(check_date: datetime.date, period: PeriodDict) -> bool:
@@ -64,26 +73,3 @@ def is_date_in_period(check_date: datetime.date, period: PeriodDict) -> bool:
     if not start_date or not end_date:
         return False
     return start_date <= check_date <= end_date
-
-
-def format_period(period: PeriodDict) -> str:
-    """
-    格式化时间段为可读字符串
-
-    将时间段字典转换为易读的显示格式。
-
-    Args:
-        period: 时间段字典，包含以下键：
-            - name (str): 时间段名称
-            - start (str): 开始日期
-            - end (str): 结束日期
-
-    Returns:
-        格式化后的字符串，格式："名称（YYYY-MM-DD ~ YYYY-MM-DD）"
-
-    Examples:
-        >>> period = {"name": "春节", "start": "2025-01-28", "end": "2025-02-04"}
-        >>> print(format_period(period))
-        春节（2025-01-28 ~ 2025-02-04）
-    """
-    return f"{period.get('name', '未命名')}（{period.get('start')} ~ {period.get('end')}）"

@@ -2,7 +2,6 @@
 core 包模块测试
 
 测试三块核心逻辑：
-- LunarUtils：公历转农历、节气、节日、完整农历信息；
 - 配置管理：get_config_snapshot 的快照与深拷贝语义；
 - 日期规则 should_work_today：工作日/周末/节假日/调休/自定义规则的优先级组合。
 日期规则用例通过覆写 global_config 控制输入，conftest 的
@@ -13,60 +12,6 @@ import datetime
 
 from core.config import ISP_MAPPING, get_config_snapshot, global_config
 from core.date_rules import should_work_today
-from core.lunar import LunarUtils
-
-
-class TestLunarUtils:
-    """农历工具类测试：公历/农历转换、节气与节日查询。"""
-
-    def test_solar_to_lunar(self):
-        """公历 2026-01-01 应转换为农历 2025 年冬月十三。"""
-        date = datetime.date(2026, 1, 1)
-        result = LunarUtils.solar_to_lunar(date)
-
-        assert result is not None
-        assert "lunar_year" in result
-        assert "lunar_month" in result
-        assert "lunar_day" in result
-        assert result["lunar_year"] == 2025
-        assert result["lunar_month"] == 11
-        # lunar-python 在 2026-01-01 公历对应农历乙巳年冬月十三
-        assert result["lunar_day"] == 13
-
-    def test_get_solar_term(self):
-        """公历 2026-02-04 应查询到节气"立春"。"""
-        li_chun = datetime.date(2026, 2, 4)
-        result = LunarUtils.get_solar_term(li_chun)
-        assert result == "立春"
-
-    def test_get_solar_term_not_solar_term(self):
-        """非节气日期（2026-01-15）应返回空字符串。"""
-        normal_day = datetime.date(2026, 1, 15)
-        result = LunarUtils.get_solar_term(normal_day)
-        assert result == ""
-
-    def test_get_festivals_solar(self):
-        """公历 2026-01-01 的公历节日列表应包含"元旦"。"""
-        new_year = datetime.date(2026, 1, 1)
-        result = LunarUtils.get_festivals(new_year)
-        assert "元旦" in result["solar"]
-
-    def test_get_festivals_traditional(self):
-        """春节（2026-02-17）应至少命中一个传统或公历节日。"""
-        spring_festival = datetime.date(2026, 2, 17)
-        result = LunarUtils.get_festivals(spring_festival)
-        assert len(result["traditional"]) > 0 or len(result["solar"]) > 0
-
-    def test_get_lunar_info(self):
-        """get_lunar_info 应返回含农历日期、节气、节日、宜忌的完整字典。"""
-        date = datetime.date(2026, 1, 1)
-        result = LunarUtils.get_lunar_info(date)
-
-        assert result is not None
-        assert "lunar_year" in result
-        assert "solar_term" in result
-        assert "festivals" in result
-        assert "yi_ji" in result
 
 
 class TestConfigManagement:

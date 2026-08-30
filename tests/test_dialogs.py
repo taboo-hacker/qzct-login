@@ -175,10 +175,10 @@ class TestSettingsDialog:
         落盘失败后内存与文件不一致，重启后设置"丢失"。
         """
         _ensure_qapp()
+        from PySide6.QtWidgets import QMessageBox
+
         import gui.dialogs.settings_panel as sp_mod
         from core.config import DEFAULT_CONFIG
-
-        from PySide6.QtWidgets import QMessageBox
 
         monkeypatch.setattr(sp_mod, "save_config_to_disk", lambda: False)
         monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))

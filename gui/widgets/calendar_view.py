@@ -57,6 +57,11 @@ class CalendarView(QWidget):
         self._init_ui()
         info("main", "万年历视图初始化完成")
 
+    @property
+    def lunar_cache(self) -> dict[datetime.date, dict[str, Any]]:
+        """农历详情缓存（公开只读视图，供 CalendarDialog 等外部访问）。"""
+        return self._lunar_cache
+
     def _init_ui(self) -> None:
         """初始化 UI"""
         main_layout = QVBoxLayout(self)
@@ -380,10 +385,10 @@ class CalendarView(QWidget):
             }
 
             self._lunar_cache[date] = result
-            # 缓存超过上限时清空，防止内存无限增长
-            if len(self._lunar_cache) > _LUNAR_CACHE_MAX_SIZE:
-                self._lunar_cache.clear()
-                self._lunar_cache[date] = result
+            # 缓存超过上限时淘汰最旧条目（保持插入序），翻回旧月份仍能命中
+            while len(self._lunar_cache) > _LUNAR_CACHE_MAX_SIZE:
+                oldest = next(iter(self._lunar_cache))
+                del self._lunar_cache[oldest]
             return result
         except Exception as e:
             warning("main", f"农历转换失败：{e}")

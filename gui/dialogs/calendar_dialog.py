@@ -32,4 +32,4 @@ class CalendarDialog(QDialog):
         self.ji_label = self._view.ji_label
         self.extra_info_label = self._view.extra_info_label
         self.work_status_label = self._view.work_status_label
-        self._lunar_cache = self._view._lunar_cache
+        self._lunar_cache = self._view.lunar_cache

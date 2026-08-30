@@ -5,7 +5,7 @@
 线程池管理已移至 infra/concurrency.py（因依赖 PySide6）。
 """
 
-from infra.date_utils import format_period, is_date_in_period, parse_date_str
+from infra.date_utils import is_date_in_period, parse_date_str
 from infra.logging import (
     Logger,
     StreamRedirector,
@@ -28,7 +28,6 @@ __all__ = [
     "init_logger",
     "warning",
     # 日期工具
-    "format_period",
     "is_date_in_period",
     "parse_date_str",
 ]

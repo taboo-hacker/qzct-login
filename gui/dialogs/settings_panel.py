@@ -207,9 +207,10 @@ class SettingsPanel(QWidget):
         login_layout.addRow("密码：", login_pwd_layout)
 
         self.isp_combo = QComboBox()
-        self.isp_combo.addItems(["移动", "电信", "联通"])
+        # 顺序与 ISP_MAPPING（core/config.py）一致；local 对应账号后缀 @local
+        self.isp_combo.addItems(["移动", "电信", "联通", "本地"])
         self.isp_combo.setMinimumHeight(30)
-        isp_mapping = {"cmcc": 0, "telecom": 1, "unicom": 2}
+        isp_mapping = {"cmcc": 0, "telecom": 1, "unicom": 2, "local": 3}
         self.isp_combo.setCurrentIndex(
             isp_mapping.get(global_config.get("ISP_TYPE", DEFAULT_CONFIG["ISP_TYPE"]), 1)
         )
@@ -396,7 +397,7 @@ class SettingsPanel(QWidget):
         pending["USERNAME"] = self.username_edit.text()
         pending["PASSWORD"] = self.password_edit.text()
 
-        isp_mapping = {0: "cmcc", 1: "telecom", 2: "unicom"}
+        isp_mapping = {0: "cmcc", 1: "telecom", 2: "unicom", 3: "local"}
         pending["ISP_TYPE"] = isp_mapping[self.isp_combo.currentIndex()]
 
         pending["WAN_IP"] = self.wan_ip_edit.text()

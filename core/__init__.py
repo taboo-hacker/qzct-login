@@ -1,7 +1,7 @@
 """
 核心包
 
-提供配置管理、农历工具、日期判断、常量、异常等核心功能。
+提供配置管理、日期判断、常量、异常等核心功能。
 （v1.4.1 起已移除加密系统，密码以明文保存在配置文件中。）
 """
 
@@ -17,7 +17,6 @@ from core.config import (
 )
 from core.date_rules import should_work_today
 from core.holidays import COMPENSATORY_WORKDAYS, HOLIDAY_PERIODS
-from core.lunar import LunarUtils
 
 __all__ = [
     # 配置
@@ -32,8 +31,6 @@ __all__ = [
     # 假期数据
     "COMPENSATORY_WORKDAYS",
     "HOLIDAY_PERIODS",
-    # 农历
-    "LunarUtils",
     # 日期判断
     "should_work_today",
 ]

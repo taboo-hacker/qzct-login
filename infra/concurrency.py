@@ -183,7 +183,9 @@ class TaskExecutor(QObject):
                     result = func(ctx, *args, **kwargs)
                 self.finished.emit(task_name, result)
             except Exception as e:
-                self.error.emit(task_name, str(e))
+                # 带上异常类型名：仅 str(e) 在空消息异常（如 raise RuntimeError()）
+                # 或自定义异常时缺乏排障信息
+                self.error.emit(task_name, f"{type(e).__name__}: {e}")
 
         future = self._executor.submit(wrapped)
 
