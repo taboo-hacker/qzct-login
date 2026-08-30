@@ -1,6 +1,6 @@
 # QZCT 校园登录助手 - 代码 Wiki
 
-> 对应版本：v1.5.0（PySide6）· 最后更新：2026-08
+> 对应版本：v1.5.3（PySide6）· 最后更新：2026-08
 
 ## 目录
 
@@ -13,6 +13,7 @@
 - [配置与安全](#配置与安全)
 - [运行与构建](#运行与构建)
 - [开发规范](#开发规范)
+- [新人上手路线](#新人上手路线)
 
 ---
 
@@ -21,7 +22,7 @@
 | 项 | 值 |
 | --- | --- |
 | 项目名称 | 校园网自动登录 + 定时关机工具（衢州职业技术学院） |
-| 版本 | 1.5.0 |
+| 版本 | 1.5.3 |
 | 语言 | Python 3.10+ |
 | GUI 框架 | PySide6（Qt for Python，LGPL 许可；Qt 6.11 运行时） |
 | 平台 | Windows（主要） |
@@ -36,6 +37,8 @@
 5. **万年历**：嵌入主窗口标签页，农历/干支/宜忌/节气/节日 + 执行计划标记，适配亮暗主题
 6. **运行日志**：Loguru 文件轮转 + GUI 实时显示（跨线程 Signal 投递）+ 日志脱敏
 7. **主题系统**：亮色/暗色主题，全局 QSS 即时切换重绘
+8. **单实例运行**（v1.5.2+）：QLocalServer 命名管道检测已有实例，二次启动唤起旧实例窗口后自行退出
+9. **代码签名分发**（v1.5.2+）：构建脚本自动对 exe 做 Authenticode 签名（SHA256+时间戳），随包分发证书与一键安装脚本
 
 ## 项目结构
 
@@ -76,6 +79,7 @@
 - 安装 `sys.excepthook`（未捕获异常写日志，打包模式下写 crash.log）
 - 创建 QApplication（高 DPI 由 Qt6 默认启用，无需额外设置）
 - 应用默认浅色主题；主窗口加载配置后切换为保存的主题
+- 注册单实例（`utils/single_instance.py`）：已有实例在运行时通知其显示窗口，本进程退出
 - 允许 Ctrl+C 干净退出
 
 ### 2. core/config.py - 配置管理
@@ -162,6 +166,8 @@
 - 源码运行：`python main.py`（依赖 `pip install -e ".[dev]"`）
 - 构建 exe：`python build.py --clean --verify`（PyInstaller onefile，30-80MB 校验 + SHA256）
 - 打包注意：spec 已将 pyproject.toml 打入数据区（frozen 模式从 `sys._MEIPASS` 读版本号）
+- 代码签名：构建后自动用当前用户证书库中 taboo-hacker 证书签名（SHA256 + DigiCert 时间戳），
+  并复制公开证书与一键安装脚本到 dist/；详见 DEVELOPING.md 的"代码签名"章节
 
 ## 开发规范
 
@@ -169,3 +175,28 @@
 - 测试：pytest + pytest-qt（`qt_api = "pyside6"`），覆盖率门禁 70%
 - CI：GitHub Actions（lint/security/test 矩阵 + release 构建 exe/wheel）
 - 提交：约定式提交（feat/fix/docs/refactor/test/chore）
+- 注释：模块/类/公共函数均需中文 docstring；行内注释解释"为什么"而非"做什么"
+
+## 新人上手路线
+
+按顺序读完即可独立开发，约半天工作量：
+
+1. **跑起来**：按 README 装依赖 → `python main.py` 启动 → 界面上点一遍"立即执行/测试 WiFi/设置"
+2. **读入口**：`main.py`（50 行）→ `gui/main_window.py` 的 `MainWindow.__init__` 与 `start_task_chain`
+3. **读一条任务链**：`services/tasks.py`（4 个任务函数）→ `infra/concurrency.py`（TaskContext/TaskExecutor/TaskChain）
+4. **读一个服务的完整实现**：`services/wifi.py`（netsh 调用、重试、协作式取消，注释最完整）
+5. **按需深入**：
+   - 改配置项 → `core/config.py`（DEFAULT_CONFIG）+ `core/config_validator.py` + `gui/dialogs/settings_panel.py`
+   - 改日期/假期逻辑 → `core/date_rules.py`（优先级链）+ `core/holidays.py`（年度数据维护）
+   - 改界面样式 → `gui/styling/`（themes.py 改配色 / qss.py 改样式规则，勿在控件里写死颜色）
+   - 改日志 → `infra/logging.py`（门面）+ `utils/logger.py`（底层）+ `gui/log_sink.py`（跨线程投递）
+6. **改完自测**：`black --check . && isort --check-only . && ruff check . && mypy core infra services gui utils main.py && pytest tests/ -q`
+
+易踩的坑（都在代码注释中有标注，此处汇总）：
+
+- **不要在构造 SettingsPanel 时调用 load_config()**（会重置全局配置导致设置页显示空白）
+- **工作线程绝不直接操作 Qt 控件**，一律走 Signal（参考 QtLogSink）
+- **execute_chain 不支持重入**；启动新链前先查 `is_chain_active()` 并关闭旧 executor
+- **取消是协作式的**：新增长循环任务时记得轮询 `ctx.is_cancelled()`
+- **DEFAULT_CONFIG 一律深拷贝后再修改**，防止测试间/运行期污染默认值
+- **日期字符串统一 "YYYY-MM-DD"**，解析用 `infra.date_utils.parse_date_str`（失败返回 None 不抛异常）

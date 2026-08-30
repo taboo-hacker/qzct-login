@@ -23,6 +23,17 @@ def create_button(
     font_size: int | None = None,
     icon: str | None = None,
 ) -> QPushButton:
+    """按钮工厂：统一字体、手型光标，并通过 btnType 属性接入全局 QSS。
+
+    Args:
+        text: 按钮文字
+        btn_type: 样式变体，对应 QSS 中的属性选择器，可选
+            primary（主操作）/ success / danger / warning / gray /
+            outline / outline_danger（描边危险）/ text（无底色文字钮）
+        min_width/min_height: 最小尺寸（像素）
+        font_size: 字号（pt），默认 FontSize.BUTTON_PRIMARY
+        icon: 图标字符（emoji 或符号），非空时拼接在文字前
+    """
     btn = QPushButton(f"{icon} {text}" if icon else text)
     btn.setFont(FontStyle.normal(font_size or FontSize.BUTTON_PRIMARY))
     btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -45,6 +56,15 @@ def create_label(
     color: str | None = None,
     word_wrap: bool = False,
 ) -> QLabel:
+    """标签工厂：统一字体族与字号，可选加粗/颜色/自动换行。
+
+    Args:
+        text: 标签文字
+        font_size: 字号（pt），默认 FontSize.CONTENT_NORMAL
+        bold: 是否加粗
+        color: 文字颜色（CSS 色值，如 "#C50F1F"），None 用 QSS 默认色
+        word_wrap: 长文本是否自动换行
+    """
     label = QLabel(text)
     label.setFont(
         FontStyle.bold(font_size or FontSize.CONTENT_NORMAL)
@@ -62,6 +82,7 @@ def create_label(
 
 
 def create_section_title(title: str, icon: str | None = None) -> QLabel:
+    """小节标题工厂：加粗小字号（如设置页中的"万年历显示设置"）。"""
     text = f"{icon} {title}" if icon else title
     label = create_label(text, FontSize.SECTION_TITLE, bold=True)
     return label
@@ -76,10 +97,15 @@ def create_card_widget() -> QFrame:
 
 
 def create_tip_label(text: str) -> QLabel:
-    theme = ThemeManager.current_theme()
+    """提示文字工厂：小字号 + 自动换行。
+
+    颜色经 role="tip" 属性接入全局 QSS（主题切换时随 QSS 重绘自动变色），
+    不再使用创建时刻的主题色内联样式——内联样式优先级高于 QSS，
+    会导致暗色切换后仍显示亮色主题的提示文字色。
+    """
     label = QLabel(text)
     label.setFont(FontStyle.normal(FontSize.TIP_TEXT))
-    label.setStyleSheet(f"color: {theme.text_tertiary}; background: transparent;")
+    label.setProperty("role", "tip")
     label.setWordWrap(True)
     return label
 
@@ -92,6 +118,9 @@ class LogTextEdit(QTextEdit):
         self.setObjectName("logView")
         self.setReadOnly(True)
         self.setFont(QFont("Consolas", 10))
+        # 常驻托盘应用日志昼夜累积：限制文档块数，Qt 自动删除最旧日志行，
+        # 防止内存持续增长与追加/重绘变慢（文件日志不受影响）
+        self.document().setMaximumBlockCount(2000)
         self._update_colors()
 
     def _update_colors(self) -> None:
@@ -102,6 +131,15 @@ class LogTextEdit(QTextEdit):
         self._update_colors()
 
     def append_colored(self, text: str, level: str = "INFO") -> None:
+        """按日志级别着色追加一行（颜色取自当前主题的 log_* 配色）。
+
+        文本先经 html.escape 转义再嵌入 <span>，防止日志内容中的
+        <、& 等字符破坏富文本结构（日志常含 URL/异常堆栈）。
+
+        Args:
+            text: 日志文本
+            level: DEBUG/INFO/WARNING/ERROR/CRITICAL
+        """
         theme = ThemeManager.current_theme()
         color_map = {
             "DEBUG": theme.log_debug,

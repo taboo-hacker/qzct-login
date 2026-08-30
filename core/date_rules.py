@@ -11,7 +11,11 @@ from infra.date_utils import is_date_in_period, parse_date_str
 
 
 def _chinese_calendar_is_holiday(date: datetime.date) -> bool:
-    """chinesecalendar 是否为法定假日。数据不可用时返回 False。"""
+    """chinesecalendar 是否为法定假日。数据不可用时返回 False。
+
+    函数内延迟导入：该库按年份打包数据，新年份未发布时会抛
+    NotImplementedError —— 捕获后回退到硬编码数据/周末规则，程序照常运行。
+    """
     try:
         import chinese_calendar as chinesecalendar
 
@@ -27,6 +31,7 @@ def _chinese_calendar_is_workday(date: datetime.date) -> bool:
 
         return bool(chinesecalendar.is_workday(date))
     except (ImportError, NotImplementedError):
+        # 库未安装或该年份数据未发布：视为"无法判定"，交给后续周末规则
         return False
 
 

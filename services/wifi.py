@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from core.config import get_config_snapshot
-from core.constants import CONFIG_DIR
+from core.constants import CONFIG_DIR, SUBPROCESS_NO_WINDOW
 from core.exceptions import WiFiConnectionError, WiFiProfileError
 from infra.logging import error, info
 
@@ -60,6 +60,7 @@ def is_wifi_connected(wifi_name: str) -> bool:
             encoding="gbk",
             errors="ignore",
             timeout=15,
+            creationflags=SUBPROCESS_NO_WINDOW,
         )
         # 精确匹配 SSID，避免子串误判（如 "WiFi" 误匹配 "WiFi-5G"）
         for line in result.splitlines():
@@ -70,7 +71,8 @@ def is_wifi_connected(wifi_name: str) -> bool:
                 if len(parts) == 2 and parts[1].strip() == wifi_name:
                     return True
         return False
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (subprocess.SubprocessError, OSError):
+        # SubprocessError 覆盖调用失败/超时；OSError 覆盖 netsh 不存在（非 Windows）
         return False
 
 
@@ -136,6 +138,7 @@ def _wifi_profile_exists(wifi_name: str) -> bool:
             encoding="gbk",
             errors="ignore",
             timeout=15,
+            creationflags=SUBPROCESS_NO_WINDOW,
         )
         # 精确匹配 profile 名称，避免子串误判
         for line in result.splitlines():
@@ -145,7 +148,7 @@ def _wifi_profile_exists(wifi_name: str) -> bool:
                 if len(parts) == 2 and parts[1].strip() == wifi_name:
                     return True
         return False
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (subprocess.SubprocessError, OSError):
         return False
 
 
@@ -175,6 +178,7 @@ def _do_connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck =
                     check=True,
                     capture_output=True,
                     timeout=15,
+                    creationflags=SUBPROCESS_NO_WINDOW,
                 )
             except subprocess.CalledProcessError as e:
                 raise WiFiProfileError(f"加载 WiFi profile 失败：{wifi_name}", str(e)) from e
@@ -195,6 +199,7 @@ def _do_connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck =
             check=False,
             capture_output=True,
             timeout=15,
+            creationflags=SUBPROCESS_NO_WINDOW,
         )
     except subprocess.CalledProcessError as e:
         # netsh wlan connect 的 exit code 不可靠，连接正在建立时也可能返回 1
@@ -260,6 +265,12 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None, should_cancel: CancelCh
     wifi_password = cfg.get("WIFI_PASSWORD", "")
     max_retry = cfg.get("MAX_WIFI_RETRY", 10)
     retry_interval = cfg.get("RETRY_INTERVAL", 5)
+
+    # 未配置 WiFi 名称（如仅用有线 + 校园网认证的用户）时直接跳过：
+    # 连空 SSID 毫无意义，重试 10 次只会白白拖慢任务链约两分钟
+    if not wifi_name:
+        info("services.wifi", "未配置 WiFi 名称，跳过 WiFi 连接（可在设置中填写）")
+        return False
 
     info("services.wifi", f"开始自动连接WiFi：{wifi_name}")
     info(

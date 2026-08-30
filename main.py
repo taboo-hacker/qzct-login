@@ -1,3 +1,17 @@
+"""
+程序入口
+
+启动流程（顺序敏感）：
+    1. 安装全局异常钩子（未捕获异常写日志/崩溃文件，而非静默消失）
+    2. 创建 QApplication，设置应用名/组织名/全局字体
+    3. 先应用默认浅色主题（避免主窗口闪白），主窗口加载配置后再切保存的主题
+    4. 构建主窗口（内部完成：初始化日志 → 加载配置 → 应用主题 → 构建 UI）
+    5. 注册单实例：已有实例运行时通知其显示窗口，本进程直接退出
+    6. 显示窗口，进入 Qt 事件循环
+
+打包运行（PyInstaller）：`python build.py` 生成 dist/qzct-login.exe。
+"""
+
 import signal
 import sys
 import traceback
@@ -10,13 +24,17 @@ from core.config import global_config
 
 
 def main() -> None:
-    """主函数 - 程序入口点"""
+    """主函数 - 程序入口点（启动流程见模块 docstring）"""
 
     def _excepthook(
         etype: type[BaseException],
         evalue: BaseException,
         tb: TracebackType | None,
     ) -> None:
+        """全局异常钩子：兜底记录所有未捕获异常。
+
+        三级落盘尝试：日志系统 → crash.log → 静默（保证钩子本身不抛错）。
+        """
         # KeyboardInterrupt 静默退出，不记日志
         if issubclass(etype, KeyboardInterrupt):
             return
@@ -50,7 +68,7 @@ def main() -> None:
     app.setOrganizationName("QZCT")
 
     # 全局字体
-    app.setFont(QFont("Microsoft YaHei", 9))  # type: ignore[attr-defined]
+    app.setFont(QFont("Microsoft YaHei", 9))
 
     # 应用默认浅色主题（全局 QSS）；主窗口加载配置后会切换为保存的主题
     from gui.styling.theme_manager import ThemeManager

@@ -1,3 +1,26 @@
+"""
+并发框架模块
+
+提供项目统一的并发调度能力，是"后台任务不卡界面"的核心：
+
+- TaskContext  —— 任务运行上下文（任务内日志缓冲 + 协作式取消标志）
+- TaskExecutor —— 线程池封装，通过 Qt Signal 把任务进度安全回报到主线程
+- @task        —— 任务函数装饰器（统一命名 / 耗时统计 / 可选超时）
+- TaskChain    —— 声明式顺序任务链（add → on_success/on_error → execute）
+
+线程模型：
+    主线程 = GUI（Qt 事件循环）；工作线程 = ThreadPoolExecutor。
+    任务函数在工作线程执行，绝不能直接操作任何 Qt 界面控件；
+    回报进度只能通过 Signal（跨线程 emit 自动走 QueuedConnection）。
+
+取消模型（协作式）：
+    cancel_all() 只是置位 TaskContext 的取消标志，不能强杀线程。
+    任务函数需在长循环 / 长睡眠中主动检查 ctx.is_cancelled() 并尽快返回
+    （services/wifi.py 的 _interruptible_sleep 是标准实现参考）。
+
+典型用法见 services/tasks.py 与 gui/main_window.py 的 start_task_chain()。
+"""
+
 import functools
 import os
 import threading
@@ -11,10 +34,22 @@ from typing import Any, Optional
 from PySide6.QtCore import QObject, Signal
 
 # 任务链步骤结果字典中的提前终止标记：值为真时链以"成功"结束并跳过剩余步骤
+# （典型场景：task_check_condition 判定今天无需执行 → 跳过 WiFi/登录/关机）
 CHAIN_BREAK_KEY = "chain_break"
 
 
 class TaskContext:
+    """任务运行上下文 —— 每个提交到 TaskExecutor 的任务各持有一个。
+
+    承担两个职责：
+    1. 任务内日志缓冲：任务函数通过 ctx.log() 记录过程信息，
+       与全局日志分离，便于任务结束时统一查看。
+    2. 协作式取消标志：cancel() 置位后，任务函数在长循环/睡眠中
+       检查 is_cancelled() 自行退出（线程无法被外部强杀）。
+
+    线程安全：所有读写均持锁，log/is_cancelled 可在任意线程调用。
+    """
+
     def __init__(self, task_name: str):
         self.task_name = task_name
         self._cancelled = False
@@ -22,19 +57,23 @@ class TaskContext:
         self._lock = threading.Lock()
 
     def log(self, message: str) -> None:
+        """追加一条任务日志到缓冲区（线程安全）。"""
         with self._lock:
             self._logs.append(message)
 
     def is_cancelled(self) -> bool:
+        """任务是否已被请求取消（任务函数应在长操作中轮询此标志）。"""
         with self._lock:
             return self._cancelled
 
     def cancel(self) -> None:
+        """请求取消任务：置位取消标志并记录日志（不会中断已运行的代码）。"""
         with self._lock:
             self._cancelled = True
             self._logs.append("任务已取消")
 
     def get_logs(self) -> list[str]:
+        """返回任务日志缓冲区的副本（线程安全）。"""
         with self._lock:
             return self._logs.copy()
 
@@ -44,6 +83,12 @@ class TaskExecutor(QObject):
 
     封装 ThreadPoolExecutor 并通过 Qt 信号向主线程报告进度。
     支持 submit（单任务）和 execute_chain（顺序任务链）两种模式。
+
+    三个信号均在主线程消费（跨线程 emit 自动 QueuedConnection），
+    因此槽函数里可以安全地操作界面控件：
+        started(task_name)              任务开始执行
+        finished(task_name, result)     任务成功，result 为任务返回值
+        error(task_name, error_msg)     任务抛出异常
     """
 
     started = Signal(str)
@@ -52,6 +97,8 @@ class TaskExecutor(QObject):
 
     def __init__(self, max_workers: int | None = None):
         super().__init__()
+        # 线程数默认按 CPU 核数×4 估算并封顶 16：
+        # 任务多为 IO 等待（WiFi/HTTP），少量 CPU 即可支撑较高并发
         if max_workers is None:
             cpu_count = os.cpu_count() or 4
             max_workers = min(cpu_count * 4, 16)
@@ -85,7 +132,20 @@ class TaskExecutor(QObject):
     def submit(
         self, func: Callable[..., Any], task_name: str = "Unknown", *args: Any, **kwargs: Any
     ) -> Future[Any]:
-        """提交单个任务到线程池执行。"""
+        """提交单个任务到线程池执行。
+
+        func 的第一个参数会被注入 TaskContext（任务函数签名约定为
+        ``func(ctx, *args, **kwargs)``，见 @task 装饰器和 services/tasks.py）。
+
+        Args:
+            func: 任务函数，首参为 TaskContext
+            task_name: 任务显示名（同名任务自动追加 _2/_3 序号避免冲突）
+            *args/**kwargs: 透传给任务函数的其余参数
+
+        Returns:
+            外层 Future —— 完成即代表信号已发出，不携带任务返回值；
+            任务结果请通过 finished 信号获取。
+        """
         ctx = TaskContext(task_name)
 
         with self._lock:
@@ -252,10 +312,35 @@ class TaskExecutor(QObject):
         self._finish_chain(False)
 
 
+# 全局任务注册表：@task 装饰器注册的包装函数按名称索引，
+# 便于按名字查找任务（当前主要供测试与调试使用）
 _task_registry: dict[str, Callable[..., Any]] = {}
 
 
 def task(name: str, timeout: float | None = None) -> Callable[..., Any]:
+    """任务函数装饰器 —— 统一命名、耗时统计、可选超时。
+
+    用法：
+
+        @task("连接WiFi", timeout=120)
+        def task_connect_wifi(ctx: TaskContext) -> dict[str, Any]:
+            ...
+
+    行为说明：
+    - 包装后函数的首参仍为 TaskContext（由 TaskExecutor.submit 注入）；
+    - 自动记录"任务开始/完成/失败"及耗时到 ctx 日志；
+    - timeout 生效机制：TaskExecutor.submit 读取 wrapper.timeout 属性，
+      用 inner_future.result(timeout=...) 等待；超时后置 ctx 取消标志
+      （协作式，任务函数需自行检查）并取消排队中的 future。
+
+    Args:
+        name: 任务显示名（出现在信号与链结果字典的键中）
+        timeout: 超时秒数，None 表示不限时
+
+    Returns:
+        装饰器（带 task_name/timeout 属性的包装函数）
+    """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(ctx: TaskContext, *args: Any, **kwargs: Any) -> Any:
@@ -274,6 +359,7 @@ def task(name: str, timeout: float | None = None) -> Callable[..., Any]:
                 ctx.log(f"任务失败: {name} (耗时: {elapsed:.2f}s, 错误: {str(e)})")
                 raise
 
+        # 属性供 TaskExecutor.submit / TaskChain.add 识别任务名与超时
         wrapper.task_name = name  # type: ignore[attr-defined]
         wrapper.timeout = timeout  # type: ignore[attr-defined]
         _task_registry[name] = wrapper
@@ -299,15 +385,24 @@ class TaskChain:
     def add(
         self, func: Callable[..., Any], name: str | None = None, *args: Any, **kwargs: Any
     ) -> "TaskChain":
+        """追加一个步骤到链尾（支持链式调用）。
+
+        Args:
+            func: 任务函数（首参为 TaskContext；通常用 @task 装饰）
+            name: 步骤名，缺省取 func.task_name（即 @task 的名字）
+        """
         task_name = name or getattr(func, "task_name", f"Step-{len(self._steps)}")
         self._steps.append({"func": func, "name": task_name, "args": args, "kwargs": kwargs})
         return self
 
     def on_success(self, callback: Callable[[bool, dict[str, Any]], None]) -> "TaskChain":
+        """注册链完成回调：链内所有步骤走完（含 chain_break 提前结束）时触发，
+        签名 (success, results)；未注册 on_error 时失败也会走此回调。"""
         self._on_success_callback = callback
         return self
 
     def on_error(self, callback: Callable[[dict[str, Any]], None]) -> "TaskChain":
+        """注册链失败回调：任一步骤抛异常导致链终止时触发，签名为 (results)。"""
         self._on_error_callback = callback
         return self
 

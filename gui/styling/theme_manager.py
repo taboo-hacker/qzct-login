@@ -13,25 +13,38 @@ from gui.styling.themes import BUILTIN_THEMES, ThemeColors
 
 
 class ThemeManager:
+    """主题管理器（类级单例风格：全部通过 classmethod 访问）。
+
+    切换主题的完整链路：
+        set_theme(name) → 记录当前主题名 → _apply_qss() →
+        build_qss(current_theme()) → QApplication.setStyleSheet(QSS)
+        → Qt 立即重绘全部窗口/对话框。
+    万年历等使用调色板的组件（QSS 覆盖不到）需另行监听并调 update_theme()。
+    """
+
     _instance: Optional["ThemeManager"] = None
     _current_theme_name: str = "light"
 
     def __init__(self) -> None:
+        # 运行时注册的自定义主题（register_theme），与 BUILTIN_THEMES 合并生效
         self._custom_themes: dict[str, ThemeColors] = {}
 
     @classmethod
     def instance(cls) -> "ThemeManager":
+        """获取管理器单例（懒创建）。"""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
     @classmethod
     def reset(cls) -> None:
+        """重置为初始状态（仅供测试隔离使用）。"""
         cls._instance = None
         cls._current_theme_name = "light"
 
     @classmethod
     def current_theme(cls) -> ThemeColors:
+        """当前主题的配色对象（未知主题名回退亮色）。"""
         name = cls._current_theme_name
         if name in BUILTIN_THEMES:
             return BUILTIN_THEMES[name]
@@ -41,6 +54,7 @@ class ThemeManager:
 
     @classmethod
     def current_theme_name(cls) -> str:
+        """当前主题名（light/dark 或自定义注册名）。"""
         return cls._current_theme_name
 
     @classmethod
@@ -67,6 +81,7 @@ class ThemeManager:
 
     @classmethod
     def available_themes(cls) -> list[str]:
+        """全部可用主题名（内置 + 运行时注册），设置页下拉框数据源。"""
         names = list(BUILTIN_THEMES.keys())
         if cls._instance:
             names.extend(cls._instance._custom_themes.keys())
@@ -74,6 +89,7 @@ class ThemeManager:
 
     @classmethod
     def register_theme(cls, name: str, colors: ThemeColors) -> None:
+        """注册自定义主题配色（注册后即可被 set_theme/设置页使用）。"""
         if cls._instance is None:
             cls._instance = cls()
         cls._instance._custom_themes[name] = colors

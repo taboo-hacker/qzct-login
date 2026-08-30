@@ -1,7 +1,11 @@
 """
 农历工具模块
 
-提供公历转农历、节气查询、节日查询、宜忌查询等农历相关功能。
+提供公历转农历、节气查询、节日查询、宜忌查询等农历相关功能，
+底层基于 lunar-python 库（支持任意年份，无需内置数据表）。
+
+使用场景：主窗口"任务日历"标签页（gui/widgets/calendar_view.py）
+显示农历日期、干支、宜忌、节气、节日等万年历信息。
 """
 
 from datetime import date
@@ -14,6 +18,8 @@ from infra.logging import error
 # ==========================================
 # 农历常量
 # ==========================================
+# 传统节日：键为（农历月, 农历日），如 (8, 15) = 八月十五中秋节
+# 注意腊月三十（除夕）在某些小年三十缺失的年份不会命中，属已知取舍
 TRADITIONAL_FESTIVALS = {
     (1, 1): "春节",
     (1, 15): "元宵节",
@@ -28,6 +34,7 @@ TRADITIONAL_FESTIVALS = {
     (12, 30): "除夕",
 }
 
+# 公历节日：键为（公历月, 公历日）
 SOLAR_FESTIVALS = {
     (1, 1): "元旦",
     (3, 8): "妇女节",
@@ -44,6 +51,8 @@ SOLAR_FESTIVALS = {
 class LunarUtils:
     """
     农历工具类，提供完整的农历功能
+
+    全部为静态方法，无状态，直接调用：LunarUtils.solar_to_lunar(date.today())
     """
 
     @staticmethod
@@ -55,7 +64,13 @@ class LunarUtils:
             date (datetime.date): 公历日期
 
         Returns:
-            dict: 包含农历信息的字典
+            dict | None: 农历信息字典，转换失败返回 None。键如下：
+                - lunar_year (int): 农历年份数字
+                - lunar_month (int): 农历月（取绝对值）
+                - lunar_day (int): 农历日
+                - is_leap_month (bool): 是否闰月（lunar-python 用负数表示闰月）
+                - full_str (str): 完整描述字符串
+                - short_str (str): 简短格式，如"正月初一"
         """
         try:
             solar = Solar.fromYmd(date.year, date.month, date.day)
@@ -97,13 +112,14 @@ class LunarUtils:
     @staticmethod
     def get_festivals(date: date) -> dict[str, list[str]]:
         """
-        获取指定日期的节日
+        获取指定日期的节日（传统农历节日 + 公历节日）
 
         Args:
             date (datetime.date): 公历日期
 
         Returns:
-            dict: 包含传统节日和公历节日的字典
+            dict: {"traditional": [农历节日名...], "solar": [公历节日名...]}，
+                  无节日时两个列表均为空
         """
         festivals: dict[str, list[str]] = {"traditional": [], "solar": []}
         solar_key = (date.month, date.day)
@@ -119,13 +135,14 @@ class LunarUtils:
     @staticmethod
     def get_yi_ji(date: date) -> dict[str, Any]:
         """
-        获取指定日期的宜忌信息
+        获取指定日期的宜忌信息（黄历）
 
         Args:
             date (datetime.date): 公历日期
 
         Returns:
-            dict: 包含宜和忌的字典
+            dict: {"宜": [条目...], "忌": [条目...]}；
+                  lunar-python 失败时两个列表为空（不伪造数据）
         """
         try:
             solar = Solar.fromYmd(date.year, date.month, date.day)
@@ -141,13 +158,17 @@ class LunarUtils:
     @staticmethod
     def get_lunar_info(date: date) -> dict[str, Any] | None:
         """
-        获取完整的农历信息
+        获取完整的农历信息（一站式聚合，万年历详情页使用）
+
+        在 solar_to_lunar 基础上追加：节气（solar_term）、节日（festivals）、
+        宜忌（yi_ji）、干支（year/month/day_ganzhi）、生肖（year_shengxiao）。
+        干支部分失败时仅记录日志，不中断其余字段。
 
         Args:
             date (datetime.date): 公历日期
 
         Returns:
-            dict: 包含所有农历信息的字典
+            dict | None: 完整农历信息；基础转换失败返回 None
         """
         lunar_info = LunarUtils.solar_to_lunar(date)
         if not lunar_info:

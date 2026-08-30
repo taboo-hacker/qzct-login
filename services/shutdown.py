@@ -2,10 +2,18 @@
 关机操作模块（仅Windows）
 
 提供定时关机设置和取消功能。
+
+实现说明：
+    直接调用系统 shutdown 命令（参数列表方式，无 shell 拼接）。
+    - 设置：shutdown /s /t <秒>   —— 到点关机，提前 5 分钟弹系统提示
+    - 取消：shutdown /a           —— 中止待执行的关机任务
+    程序重启后设置的关机任务依然有效（由 Windows 调度），
+    所以每次设置前先取消旧任务，避免叠加多个关机倒计时。
 """
 
 import subprocess
 
+from core.constants import SUBPROCESS_NO_WINDOW
 from infra.logging import error, info
 
 
@@ -19,7 +27,16 @@ def cancel_shutdown() -> bool:
     Returns:
         bool: True 表示取消成功（或无待执行任务），False 表示取消失败
     """
-    result = subprocess.run(["shutdown", "/a"], capture_output=True, timeout=10)
+    try:
+        result = subprocess.run(
+            ["shutdown", "/a"],
+            capture_output=True,
+            timeout=10,
+            creationflags=SUBPROCESS_NO_WINDOW,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        error("business", f"取消关机任务异常: {e}")
+        return False
     # returncode 1119 表示没有待取消的关机任务，不算错误
     if result.returncode != 0 and result.returncode != 1119:
         error(
@@ -45,7 +62,16 @@ def set_shutdown_timer(seconds: int) -> bool:
         bool: True 表示设置成功，False 表示设置失败
     """
     cancel_shutdown()
-    result = subprocess.run(["shutdown", "/s", "/t", str(seconds)], capture_output=True, timeout=10)
+    try:
+        result = subprocess.run(
+            ["shutdown", "/s", "/t", str(seconds)],
+            capture_output=True,
+            timeout=10,
+            creationflags=SUBPROCESS_NO_WINDOW,
+        )
+    except (subprocess.SubprocessError, OSError) as e:
+        error("business", f"设置关机任务异常: {e}")
+        return False
     if result.returncode != 0:
         error(
             "business",

@@ -79,15 +79,17 @@ def campus_login(cfg: dict[str, Any] | None = None) -> bool:
     isp_type = cfg.get("ISP_TYPE", "telecom")
     isp_suffix = ISP_MAPPING.get(isp_type, "@telecom")
 
-    callback: str = CAMPUS_LOGIN_CONFIG["callback"]  # type: ignore[assignment]
-    login_url: str = CAMPUS_LOGIN_CONFIG["login_url"]  # type: ignore[assignment]
+    callback: str = CAMPUS_LOGIN_CONFIG["callback"]
+    login_url: str = CAMPUS_LOGIN_CONFIG["login_url"]
 
     params = {
         "callback": callback,
         "login_method": "1",
+        # 账号拼接运营商后缀：如 "20230001@telecom"，网关按后缀路由认证
         "user_account": f"{cfg.get('USERNAME', '')}{isp_suffix}",
         "user_password": cfg.get("PASSWORD", ""),
         "wlan_user_ip": cfg.get("WAN_IP", ""),
+        # 以下字段网关不校验，保留门户页默认值即可
         "wlan_user_ipv6": "",
         "wlan_user_mac": "",
         "wlan_ac_ip": "",

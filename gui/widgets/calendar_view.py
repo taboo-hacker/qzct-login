@@ -137,12 +137,13 @@ class CalendarView(QWidget):
 
         # 连接事件
         self.calendar.selectionChanged.connect(self.on_date_selected)
+        # update_theme() 内部已调用 mark_execution_dates()，无需再显式标记一次
         self.update_theme()
-        self.mark_execution_dates()
         self.on_date_selected()
 
     @staticmethod
     def _make_separator() -> QFrame:
+        """详情卡片内的水平分隔线（objectName=divider 接入全局 QSS）。"""
         line = QFrame()
         line.setObjectName("divider")
         line.setFixedHeight(1)
@@ -249,8 +250,15 @@ class CalendarView(QWidget):
             if global_config.get("SHOW_LUNAR_CALENDAR", True):
                 lunar_detail = self._get_lunar_detail(date)
 
+                # 农历显示格式：0=简化（正月初一）/ 1=完整（农历二〇二五年正月初一）
+                lunar_date_key = (
+                    "lunar_date_full"
+                    if global_config.get("LUNAR_DISPLAY_FORMAT", 0) == 1
+                    else "lunar_date_simple"
+                )
+
                 if self.lunar_date_label:
-                    self.lunar_date_label.setText(lunar_detail.get("lunar_date", ""))
+                    self.lunar_date_label.setText(lunar_detail.get(lunar_date_key, ""))
                 if self.ganzhi_label:
                     self.ganzhi_label.setText(lunar_detail.get("ganzhi", ""))
 
@@ -337,7 +345,10 @@ class CalendarView(QWidget):
 
             lunar_month = lunar.getMonthInChinese()
             lunar_day = lunar.getDayInChinese()
-            lunar_date_str = f"农历 {lunar_month}月{lunar_day}"
+            lunar_year_str = lunar.getYearInChinese()
+            # 两种显示格式都算好缓存（LUNAR_DISPLAY_FORMAT 运行时可切换）
+            lunar_date_simple = f"农历 {lunar_month}月{lunar_day}"
+            lunar_date_full = f"农历{lunar_year_str}年{lunar_month}月{lunar_day}"
 
             year_ganzhi = lunar.getYearInGanZhi()
             month_ganzhi = lunar.getMonthInGanZhi()
@@ -358,13 +369,14 @@ class CalendarView(QWidget):
                 festivals["solar"].extend(solar_festivals)
 
             result = {
-                "lunar_date": lunar_date_str,
+                "lunar_date_simple": lunar_date_simple,
+                "lunar_date_full": lunar_date_full,
                 "ganzhi": ganzhi_str,
                 "yi": yi_list,
                 "ji": ji_list,
                 "jieqi": jieqi if jieqi else "",
                 "festivals": festivals,
-                "other_info": f"农历{lunar.getYearInChinese()}年",
+                "other_info": f"农历{lunar_year_str}年",
             }
 
             self._lunar_cache[date] = result
@@ -376,7 +388,8 @@ class CalendarView(QWidget):
         except Exception as e:
             warning("main", f"农历转换失败：{e}")
             return {
-                "lunar_date": "（农历转换失败）",
+                "lunar_date_simple": "（农历转换失败）",
+                "lunar_date_full": "（农历转换失败）",
                 "ganzhi": "",
                 "yi": [],
                 "ji": [],
@@ -385,8 +398,21 @@ class CalendarView(QWidget):
                 "other_info": "",
             }
 
+    @staticmethod
+    def _find_period(periods: list[dict[str, Any]], date: datetime.date) -> dict[str, Any] | None:
+        """返回第一个包含指定日期的区间，均不包含时返回 None。"""
+        for period in periods:
+            if is_date_in_period(date, period):
+                return period
+        return None
+
     def should_work_on_date(self, date: datetime.date) -> tuple[bool, str]:
-        """判断指定日期是否需要执行任务"""
+        """判断指定日期是否需要执行任务，并给出状态文案。
+
+        判定结果 (bool) 委托 core.date_rules.should_work_today；
+        状态文案按与判定核心相同的优先级拼装（自定义规则 > 调休 > 内置节假日），
+        避免出现"文案说调休上班、实际按自定义规则判定"的误导。
+        """
         try:
             result = should_work_today(date)
             debug(
@@ -398,34 +424,34 @@ class CalendarView(QWidget):
             if result:
                 status = "需要执行任务"
 
-            compensatory_days = [
-                parse_date_str(d)
-                for d in global_config.get("COMPENSATORY_WORKDAYS", [])
-                if parse_date_str(d)
-            ]
-            if date in compensatory_days:
-                status = "调休上班日 - 需要执行任务"
-            else:
-                base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])
-                for period in base_holiday_periods:
-                    if is_date_in_period(date, period):
-                        if not result:
-                            status = f"节假日({period.get('name')}) - 不执行任务"
-                        break
-
             date_rules = global_config.get("DATE_RULES", {})
             if date_rules.get("ENABLE_CUSTOM_RULE", False):
-                custom_work_periods = date_rules.get("CUSTOM_WORKDAY_PERIODS", [])
-                for period in custom_work_periods:
-                    if is_date_in_period(date, period):
-                        status = f"自定义工作日({period.get('name')}) - 需要执行任务"
-                        break
-
-                custom_holiday_periods = date_rules.get("CUSTOM_HOLIDAY_PERIODS", [])
-                for period in custom_holiday_periods:
-                    if is_date_in_period(date, period):
-                        status = f"自定义假期({period.get('name')}) - 不执行任务"
-                        break
+                # 自定义规则模式：调休/内置节假日不参与判定，文案只反映自定义来源
+                period = self._find_period(date_rules.get("CUSTOM_WORKDAY_PERIODS", []), date)
+                if period is not None:
+                    status = f"自定义工作日({period.get('name') or '未命名'}) - 需要执行任务"
+                else:
+                    period = self._find_period(date_rules.get("CUSTOM_HOLIDAY_PERIODS", []), date)
+                    if period is not None:
+                        status = f"自定义假期({period.get('name') or '未命名'}) - 不执行任务"
+                    else:
+                        weekly_days = date_rules.get("WEEKLY_EXECUTE_DAYS", [0, 1, 2, 3, 4])
+                        if date.weekday() in weekly_days:
+                            status = "自定义每周执行日 - 需要执行任务"
+                        else:
+                            status = "自定义每周休息日 - 不执行任务"
+            else:
+                compensatory_days = [
+                    parsed
+                    for d in global_config.get("COMPENSATORY_WORKDAYS", [])
+                    if (parsed := parse_date_str(d)) is not None
+                ]
+                if date in compensatory_days:
+                    status = "调休上班日 - 需要执行任务"
+                else:
+                    period = self._find_period(global_config.get("HOLIDAY_PERIODS", []), date)
+                    if period is not None and not result:
+                        status = f"节假日({period.get('name') or '未命名'}) - 不执行任务"
 
             return (result, status)
         except Exception as e:
@@ -437,15 +463,21 @@ class CalendarView(QWidget):
             return (False, f"错误：{str(e)}")
 
     def mark_execution_dates(self) -> None:
-        """标记日历中需要执行任务的日期（颜色取自当前主题）。"""
+        """标记日历当前显示月份的执行日期（颜色取自当前主题）。
+
+        以 yearShown()/monthShown() 为准：currentPageChanged 信号触发时
+        selectedDate 仍停留在旧页（翻页不改变选中日期），用它定位会把
+        颜色标到错误月份，导致新翻到的月份完全没有标记。
+        每次先清空全部日期格式再重标：setDateTextFormat 按 QDate 永久生效，
+        不清除会残留旧主题色、旧配置下计算的标记。
+        """
         try:
             if self.calendar is None:
                 return
 
             theme = ThemeManager.current_theme()
-            current_qdate = self.calendar.selectedDate()
-            current_year = current_qdate.year()
-            current_month = current_qdate.month()
+            current_year = self.calendar.yearShown()
+            current_month = self.calendar.monthShown()
 
             first_day = datetime.date(current_year, current_month, 1)
             if current_month == 12:
@@ -461,11 +493,16 @@ class CalendarView(QWidget):
             rest_bg.setAlpha(80)
             fg = QColor(theme.text_primary)
 
-            iter_date = first_day
+            # 传入无效 QDate 清除所有日期的自定义格式（Qt 约定行为）
+            self.calendar.setDateTextFormat(QDate(), QTextCharFormat())
+
             day_count = 0
+            iter_date = first_day
             while iter_date <= last_day:
                 try:
-                    should_work, _status = self.should_work_on_date(iter_date)
+                    # 直接用判定核心（bool 即可，跳过 should_work_on_date 的
+                    # 状态文案拼装——那是选中详情专用，逐日标记时是纯开销）
+                    should_work = should_work_today(iter_date)
                     qt_date = QDate(iter_date.year, iter_date.month, iter_date.day)
 
                     fmt = QTextCharFormat()

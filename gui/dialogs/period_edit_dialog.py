@@ -34,7 +34,9 @@ class PeriodEditDialog(QDialog):
         super().__init__(parent)
         is_edit = period is not None
         self.setWindowTitle("编辑时间段" if is_edit else "添加时间段")
-        self.setFixedSize(420, 280)
+        # 固定宽度 + 最小高度（不锁死高度：系统字体放大或文案变长时可纵向伸展）
+        self.setFixedWidth(420)
+        self.setMinimumHeight(280)
 
         self.period = period if period else {"name": "", "start": "", "end": ""}
         self.result_period: dict[str, Any] | None = None
@@ -120,7 +122,8 @@ class PeriodEditDialog(QDialog):
         main_layout.addSpacing(15)
 
     def save(self) -> None:
-        """保存时间段"""
+        """校验并保存：名称必填、起止日期合法（开始≤结束），
+        通过后填充 result_period 并 accept 关闭（调用方据此取值）。"""
         if self.name_edit is None:
             return
 

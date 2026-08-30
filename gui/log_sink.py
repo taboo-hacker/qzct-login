@@ -46,6 +46,7 @@ class QtLogSink(QObject):
 
     @property
     def gui_widget(self) -> QTextEdit | None:
+        """当前绑定的日志显示组件（未绑定/已销毁时为 None）。"""
         return self._gui_widget
 
     def set_widget(self, widget: QTextEdit) -> None:
@@ -65,6 +66,8 @@ class QtLogSink(QObject):
 
     @classmethod
     def set_gui_widget(cls, widget: QTextEdit) -> None:
+        """绑定日志显示组件（首次调用创建单例，之后复用并替换 widget），
+        随后立即 flush 初始化前缓冲的日志。"""
         if cls._instance is None:
             cls._instance = cls(widget)
         else:
@@ -103,6 +106,7 @@ class QtLogSink(QObject):
 
     @classmethod
     def _flush_pending_logs(cls) -> None:
+        """flush 实现：合并缓冲为一条消息经 Signal 投递（持锁内只做拷贝）。"""
         with cls._pending_lock:
             if not cls._pending_logs:
                 return
@@ -113,5 +117,6 @@ class QtLogSink(QObject):
 
     @classmethod
     def flush_pending_logs(cls) -> None:
+        """对外接口：有缓冲日志时执行 flush（无日志时零开销）。"""
         if cls._pending_logs:
             cls._flush_pending_logs()

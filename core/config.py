@@ -48,6 +48,21 @@ def _cleanup_legacy_files() -> None:
                 pass
 
 
+# 默认配置：字段含义 ——
+#   WIFI_NAME/WIFI_PASSWORD   目标 WiFi 的 SSID 与密码
+#   MAX_WIFI_RETRY            WiFi 连接最大重试次数
+#   RETRY_INTERVAL            基础重试间隔秒数（实际按指数退避放大，封顶 60s）
+#   USERNAME/PASSWORD         校园网认证账号密码（明文存储）
+#   ISP_TYPE                  运营商类型（cmcc/telecom/unicom/local，见 ISP_MAPPING）
+#   WAN_IP                    认证参数中的 wlan_user_ip（一般留空即可）
+#   SHUTDOWN_HOUR/MIN         定时关机时间（24 小时制）
+#   AUTOSTART                 开机自启开关（当前版本未实现写注册表，保留字段）
+#   THEME                     界面主题（light/dark）
+#   SHOW_LUNAR_CALENDAR       万年历是否显示农历/宜忌等详情
+#   LUNAR_DISPLAY_FORMAT      农历显示格式（0=简化 / 1=完整）
+#   HOLIDAY_PERIODS           节假日区间（含寒暑假），来源 core/holidays.py
+#   COMPENSATORY_WORKDAYS     调休上班日列表，来源 core/holidays.py
+#   DATE_RULES                自定义日期规则（启用开关/每周执行日/自定义区间）
 DEFAULT_CONFIG: dict[str, Any] = {
     "WIFI_NAME": "",
     "WIFI_PASSWORD": "",
@@ -73,8 +88,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
 }
 
+# 运营商类型 → 登录账号后缀映射（campus_login 拼接 user_account 时使用）
 ISP_MAPPING = {"cmcc": "@cmcc", "telecom": "@telecom", "unicom": "@unicom", "local": "@local"}
 
+# Python weekday() 数字（0=周一）→ 中文名（UI 显示用）
 WEEKDAY_MAPPING = {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五", 5: "周六", 6: "周日"}
 
 
@@ -257,7 +274,8 @@ def save_config() -> bool:
         bool: 保存是否成功
     """
     try:
-        config_to_save: dict[str, Any] = copy.deepcopy(global_config.snapshot())
+        # snapshot() 已返回深拷贝，直接落盘（无需再套一层 deepcopy）
+        config_to_save: dict[str, Any] = global_config.snapshot()
 
         # 原子写入：先写临时文件，再重命名，防止写入中断导致配置损坏
         tmp_file = CONFIG_FILE + ".tmp"

@@ -37,7 +37,11 @@ class AboutDialog(QDialog):
         """初始化 UI"""
         self.setWindowTitle("关于我们")
         self.setFixedWidth(400)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)  # type: ignore[attr-defined]
+        # 隐藏标题栏"?"帮助按钮；该标志在部分 Qt 版本中可能缺失/移除，
+        # 动态获取以兼容（属性存在时行为与直接引用完全一致）
+        help_hint = getattr(Qt, "WindowContextHelpButtonHint", None)
+        if help_hint is not None:
+            self.setWindowFlags(self.windowFlags() & ~help_hint)
 
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 20, 24, 16)
@@ -118,18 +122,21 @@ class AboutDialog(QDialog):
         if clipboard:
             clipboard.setText(self.version)
 
-        original_text = self.version_btn.text()
         self.version_btn.setText("✓ 已复制")
 
-        self._restore_timer = QTimer(self)
-        self._restore_timer.setSingleShot(True)
-        self._restore_timer.timeout.connect(lambda: self._restore_version_button(original_text))
+        # 复用单个定时器：连续点击复制时先重置再计时，
+        # 避免旧定时器提前把"已复制"恢复成版本号
+        if self._restore_timer is None:
+            self._restore_timer = QTimer(self)
+            self._restore_timer.setSingleShot(True)
+            self._restore_timer.timeout.connect(self._restore_version_button)
+        self._restore_timer.stop()
         self._restore_timer.start(2000)
 
-    def _restore_version_button(self, original_text: str) -> None:
-        """恢复版本按钮文本"""
+    def _restore_version_button(self) -> None:
+        """恢复版本按钮文本（重新读取当前文本，避免闭包捕获旧值）"""
         if self.version_btn:
-            self.version_btn.setText(original_text)
+            self.version_btn.setText(f"版本 {self.version}")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         """关闭时停止定时器，避免在对话框销毁后触发回调"""

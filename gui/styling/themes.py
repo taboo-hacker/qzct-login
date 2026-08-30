@@ -54,10 +54,12 @@ class ThemeColors:
 
 
 def create_light_theme() -> ThemeColors:
+    """亮色主题（默认）：全部字段使用 ThemeColors 数据类的默认值。"""
     return ThemeColors(name="light")
 
 
 def create_dark_theme() -> ThemeColors:
+    """暗色主题：逐字段覆盖配色（背景加深、文字提亮、语义色降饱和防刺眼）。"""
     return ThemeColors(
         name="dark",
         log_debug="#707070",
@@ -93,6 +95,8 @@ def create_dark_theme() -> ThemeColors:
     )
 
 
+# 内置主题注册表：ThemeManager.available_themes() / set_theme() 的数据源。
+# 新增主题：实现 create_xxx_theme() 工厂后在此注册即可被设置页自动发现。
 BUILTIN_THEMES: dict[str, ThemeColors] = {
     "light": create_light_theme(),
     "dark": create_dark_theme(),

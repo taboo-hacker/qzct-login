@@ -3,6 +3,11 @@ Loguru 日志系统配置
 
 提供日志器初始化和配置。QtLogSink 已移至 gui/log_sink.py，
 本模块通过延迟导入使用，使 utils/ 层不再在模块加载时耦合 PySide6。
+
+三个 sink（按配置启用）：
+    GUI   → gui/log_sink.py 的 QtLogSink（跨线程 Signal 投递到主线程）
+    文件  → log_file 参数指定的路径（轮转 + zip 压缩 + 保留期清理）
+    终端  → sys.stderr 彩色输出（打包 console=False 模式下自动跳过）
 """
 
 import os
@@ -27,6 +32,8 @@ def _restrict_file_permissions(filepath: str) -> None:
                 capture_output=True,
                 timeout=10,
                 check=False,
+                # GUI 进程调用控制台程序避免闪黑框（分支内已确保 Windows）
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
             os.chmod(filepath, 0o600)
@@ -48,12 +55,13 @@ def setup_logger(
         gui_widget: PyQt QTextEdit 组件，用于显示日志
         log_file: 日志文件路径
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        max_size: 日志文件最大大小，默认 10 MB
-        retention: 日志保留时间，默认 30 天
+        max_size: 日志文件最大大小，默认 10 MB（超过后轮转）
+        retention: 日志保留时间，默认 30 天（过期归档自动删除）
 
     Returns:
         Loguru logger 实例
     """
+    # 先移除 loguru 默认的 stderr sink，避免与下面自定义的终端 sink 重复
     logger.remove()
 
     # 纯文本格式（GUI + 文件）

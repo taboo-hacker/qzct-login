@@ -69,6 +69,7 @@ class BaseListEditorWidget(QWidget):
         pass
 
     def _setup_table(self, layout: QVBoxLayout) -> None:
+        """创建数据表格：整行选择、禁用双击编辑（编辑走对话框）、列等宽拉伸。"""
         self.table = QTableWidget()
         self.table.setColumnCount(len(self._columns))
         self.table.setHorizontalHeaderLabels(self._columns)
@@ -79,9 +80,12 @@ class BaseListEditorWidget(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         header.setVisible(False)
         self.table.setAlternatingRowColors(True)
+        # 双击行等同点"编辑"（表格本身禁用单元格直接编辑，编辑走对话框）
+        self.table.cellDoubleClicked.connect(lambda row, _col: self._edit_item(row))
         layout.addWidget(self.table)
 
     def _setup_button_bar(self, layout: QVBoxLayout) -> None:
+        """创建底部按钮栏：添加 / 编辑 / 删除 …… 清空所有。"""
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(10)
 
@@ -124,10 +128,12 @@ class BaseListEditorWidget(QWidget):
     # ------------------------------------------------------------------
 
     def add_item(self) -> None:
+        """添加按钮入口：调用子类 _add_item 后统一排序刷新。"""
         self._add_item()
         self._post_modify()
 
     def edit_item(self) -> None:
+        """编辑按钮入口：需先选中一行，调用子类 _edit_item 后刷新。"""
         if self.table is None:
             return
         selected = self.table.selectedItems()
@@ -138,6 +144,10 @@ class BaseListEditorWidget(QWidget):
         self._post_modify()
 
     def delete_item(self) -> None:
+        """删除按钮入口：删除选中行（无二次确认，删除单行影响小）。
+
+        删除后把选中移动到相邻行，连续删除多行时不必反复点选。
+        """
         if self.table is None:
             return
         selected = self.table.selectedItems()
@@ -149,13 +159,23 @@ class BaseListEditorWidget(QWidget):
         items.pop(row)
         self._set_items(items)
         self._post_modify()
+        self._select_row(min(row, len(items) - 1))
+
+    def _select_row(self, row: int) -> None:
+        """选中指定行（表格为空或行号越界时不做任何事）。"""
+        if self.table is None or not 0 <= row < self.table.rowCount():
+            return
+        self.table.selectRow(row)
 
     def clear_all(self) -> None:
+        """清空按钮入口：弹确认框后清空全部数据（破坏性操作需确认）。"""
         reply = QMessageBox.question(
             self,
             "确认",
             self._get_clear_confirm_text(),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            # 破坏性操作默认聚焦"否"，防止回车误触清空全部数据
+            QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._set_items([])
@@ -170,22 +190,27 @@ class BaseListEditorWidget(QWidget):
         self.refresh()
 
     # ------------------------------------------------------------------
-    # 子类必须实现的钩子
+    # 子类必须实现的钩子（数据源绑定 + 行为定制）
     # ------------------------------------------------------------------
 
     def _get_items(self) -> list[Any]:
+        """返回表格数据源列表（子类从自身状态/配置提供）。"""
         raise NotImplementedError
 
     def _set_items(self, items: list[Any]) -> None:
+        """整体写回数据源（增删/排序/清空后调用）。"""
         raise NotImplementedError
 
     def _row_to_cells(self, item: Any) -> list[QTableWidgetItem]:
+        """把一条数据渲染为一行单元格（列数须与 columns 一致）。"""
         raise NotImplementedError
 
     def _add_item(self) -> None:
+        """添加一条数据（子类自定义交互，如内联表单或弹窗）。"""
         raise NotImplementedError
 
     def _edit_item(self, row: int) -> None:
+        """编辑指定行（通常弹出编辑对话框后写回）。"""
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -197,9 +222,11 @@ class BaseListEditorWidget(QWidget):
         return None
 
     def _get_select_warning_text(self) -> str:
+        """未选中行点编辑/删除时的提示文案。"""
         return "请先选择要操作的行"
 
     def _get_clear_confirm_text(self) -> str:
+        """清空按钮的确认文案。"""
         return "确定要清空所有数据吗？"
 
     def update_theme(self) -> None:

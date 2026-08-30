@@ -7,7 +7,6 @@
 import contextlib
 import datetime
 import sys
-import time
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
@@ -53,7 +52,27 @@ from utils.version import get_project_version
 
 
 class MainWindow(QMainWindow):
-    """主窗口"""
+    """主窗口
+
+    布局结构：
+
+        ┌────────────┬──────────────────────────┐
+        │ 今日状态    │  QTabWidget              │
+        │  日期/徽标   │   ├ 运行日志（log_text） │
+        │  规则/关机   │   ├ 设置（SettingsPanel）│
+        │ ──────────  │   └ 任务日历（Calendar） │
+        │ 任务操作    │                          │
+        │  执行/取消   │                          │
+        │  测试按钮    │                          │
+        ├────────────┴──────────────────────────┤
+        │ 退出 | 状态文本 ...          关于 | 版本 │
+        └───────────────────────────────────────┘
+
+    初始化顺序（顺序敏感，见 __init__ 内注释）：
+        日志组件 → 日志系统 → 加载配置 → 应用主题 → 构建界面 → 托盘 → 定时器
+    界面视觉统一由全局 QSS 控制（gui/styling/qss.py），窗口代码只设置
+    objectName / role / btnType 等选择器属性，不写具体颜色。
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -67,7 +86,7 @@ class MainWindow(QMainWindow):
         # 日志组件先创建，供日志系统使用
         self.log_text = LogTextEdit()
 
-        # 初始化日志（日志文件落盘到 ~/.qzct/qzct.log，5MB 轮转×5）
+        # 初始化日志（日志文件落盘到 ~/.qzct/qzct.log，10MB 轮转、保留 35 天）
         init_logger(gui_log_widget=self.log_text, log_file_path=LOG_FILE, level=1)
 
         # 必须先加载配置并应用保存的主题，再构建界面：
@@ -285,6 +304,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _update_time_display(self) -> None:
+        """每秒刷新底部状态栏时钟（活跃任务期间让位给任务进度信息）。"""
         # 有活跃任务时不覆盖状态栏，避免覆盖任务进度信息
         if self.task_executor and self.task_executor.active_count > 0:
             return
@@ -294,21 +314,27 @@ class MainWindow(QMainWindow):
             self.footer_status.setText(f"就绪  |  {time_str}")
 
     def _set_buttons_enabled(self, enabled: bool) -> None:
+        """任务运行期间禁用任务相关按钮，结束后恢复（防止重复触发）。"""
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
         self.run_btn.setText("立即执行" if enabled else "运行中...")
 
     def _update_status_display(self) -> None:
+        """刷新左侧卡片：日期、执行状态徽标、生效规则来源、关机时间。
+
+        规则来源的判断顺序：硬编码调休日 → 自定义规则 → 默认（国务院安排）。
+        徽标状态变化后需 unpolish/polish 手动刷新 QSS（属性选择器不自动重绘）。
+        """
         today = datetime.date.today()
         need_work = should_work_today()
         date_rules = global_config.get("DATE_RULES", {})
 
         rule_source = "国务院官方节假日"
         if today in [
-            parse_date_str(d)
+            parsed
             for d in global_config.get("COMPENSATORY_WORKDAYS", [])
-            if parse_date_str(d)
+            if (parsed := parse_date_str(d)) is not None
         ]:
             rule_source = "调休上班日"
         elif date_rules.get("ENABLE_CUSTOM_RULE", False):
@@ -336,6 +362,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def run_on_start(self) -> None:
+        """程序启动后延迟 1 秒自动执行任务链（仅一次，_task_chain_started 防重）。"""
         if self._task_chain_started:
             return
         self._task_chain_started = True
@@ -343,6 +370,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1000, self.start_task_chain)
 
     def start_task_chain(self) -> None:
+        """组装并启动完整任务链：检查条件 → WiFi → 登录 → 定时关机。
+
+        每次启动新建 TaskExecutor（旧 executor 先关闭），链进度通过
+        started/finished/error 三个信号驱动底部状态栏。
+        """
         # 防重入：旧链仍在执行时忽略重复启动请求（否则旧链信号会在
         # 已关闭的线程池上触发提交，导致 PySide6 abort）
         if self.task_executor is not None and self.task_executor.is_chain_active():
@@ -369,19 +401,23 @@ class MainWindow(QMainWindow):
         chain.execute(self.task_executor)
 
     def _on_task_started(self, task_name: str) -> None:
+        """单个任务开始（TaskExecutor.started 信号，主线程执行）。"""
         info("main", f"任务开始: {task_name}")
 
     def _on_task_finished(self, task_name: str, result: dict[str, Any]) -> None:
+        """单个任务成功（TaskExecutor.finished 信号，主线程执行）。"""
         info("main", f"任务完成: {task_name}")
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"{task_name} 完成")
 
     def _on_task_error(self, task_name: str, error_msg: str) -> None:
+        """单个任务抛异常（TaskExecutor.error 信号，主线程执行）。"""
         error("main", f"任务出错: {task_name} - {error_msg}")
         if hasattr(self, "footer_status"):
             self.footer_status.setText(f"{task_name} 出错")
 
     def _on_chain_success(self, success: bool, results: dict[str, Any]) -> None:
+        """任务链整体完成回调：区分"全部执行/今天无需执行/部分失败"三种结果。"""
         self._set_buttons_enabled(True)
         if success:
             # 检查执行条件步骤：今天无需执行时给出不同提示
@@ -401,6 +437,7 @@ class MainWindow(QMainWindow):
             self._tray.notify("校园网自动登录", "部分任务执行失败，请查看日志")
 
     def _on_chain_error(self, results: dict[str, Any]) -> None:
+        """任务链异常终止回调：恢复按钮并提示失败。"""
         self._set_buttons_enabled(True)
         self.footer_status.setText("任务链执行失败")
         error("main", f"任务链执行失败: {results}")
@@ -410,6 +447,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def on_run_once(self) -> None:
+        """「立即执行」按钮：确认后手动触发一次完整任务链（Ctrl+R）。"""
         if (
             QMessageBox.question(self, "确认", "是否立即执行一次完整任务（WiFi+登录+关机）？")
             == QMessageBox.StandardButton.Yes
@@ -418,6 +456,7 @@ class MainWindow(QMainWindow):
             self.start_task_chain()
 
     def on_cancel_shutdown(self) -> None:
+        """「取消关机」按钮：确认后执行 shutdown /a 中止待执行的关机任务。"""
         if (
             QMessageBox.question(self, "确认", "是否取消已设置的关机任务？")
             == QMessageBox.StandardButton.Yes
@@ -428,6 +467,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "完成", "已尝试取消关机任务")
 
     def on_test_wifi(self) -> None:
+        """「测试 WiFi」按钮：后台线程单独测试 WiFi 连接（不走任务链）。
+
+        结果通过字符串状态码区分（见 _do_wifi_test 返回值），
+        完成后弹窗告知用户。
+        """
         wifi_name = global_config.get("WIFI_NAME", "")
         if not wifi_name:
             QMessageBox.warning(self, "提示", "请先在设置中配置 WiFi 名称")
@@ -444,26 +488,31 @@ class MainWindow(QMainWindow):
         self._test_wifi_name = wifi_name
 
         def _do_wifi_test(ctx: TaskContext) -> str:
+            """在后台线程执行的测试逻辑，返回状态码供 UI 判断。"""
             if is_wifi_connected(wifi_name):
-                return "already_connected"
+                return "already_connected"  # 本来就已连接
             wifi_password = global_config.get("WIFI_PASSWORD", "")
             if connect_wifi(wifi_name, wifi_password):
-                time.sleep(3)
+                # 等待连接稳定后再验证（分片睡眠，任务取消时可提前退出）
+                from services.wifi import _interruptible_sleep
+
+                _interruptible_sleep(3, ctx.is_cancelled)
                 if is_wifi_connected(wifi_name):
-                    return "connected"
-                return "failed_after_connect"
-            return "connect_command_failed"
+                    return "connected"  # 连接成功且稳定
+                return "failed_after_connect"  # 发起连接但未稳定连上
+            return "connect_command_failed"  # 连接命令执行失败
 
         executor = TaskExecutor(max_workers=1)
         self._test_executors.append(executor)
         executor.finished.connect(self._on_wifi_test_finished)
         executor.error.connect(self._on_wifi_test_error)
-        # 任务完成后从列表中移除
+        # 任务完成后从列表中移除（避免长期持有已结束的线程池）
         executor.finished.connect(lambda *_: self._release_test_executor(executor))
         executor.error.connect(lambda *_: self._release_test_executor(executor))
         executor.submit(_do_wifi_test, "test_wifi")
 
     def _on_wifi_test_finished(self, task_name: str, result: object) -> None:
+        """WiFi 测试完成：按状态码弹出对应结果提示。"""
         wifi_name = getattr(self, "_test_wifi_name", "")
         if result == "already_connected":
             info("main", f"已成功连接到 WiFi：{wifi_name}")
@@ -487,11 +536,17 @@ class MainWindow(QMainWindow):
             )
 
     def _on_wifi_test_error(self, task_name: str, error_msg: str) -> None:
+        """WiFi 测试线程抛异常时的错误提示。"""
         self.footer_status.setText("WiFi 测试出错")
         error("main", f"WiFi 测试异常：{error_msg}")
         QMessageBox.critical(self, "错误", f"WiFi 测试出错：{error_msg}")
 
     def on_test_login(self) -> None:
+        """「测试登录」按钮：后台线程单独测试校园网认证（不走任务链）。
+
+        详细结果写入运行日志（campus_login 内部已分级记录），
+        弹窗仅提示"完成，请查看日志"。
+        """
         username = global_config.get("USERNAME", "")
         if not username:
             QMessageBox.warning(self, "提示", "请先在设置中配置校园网账号")
@@ -507,6 +562,7 @@ class MainWindow(QMainWindow):
         info("main", "测试校园网登录")
 
         def _do_login_test(ctx: TaskContext) -> bool:
+            """后台线程执行登录测试，成功与否都通过 finished 信号回报。"""
             return campus_login()
 
         executor = TaskExecutor(max_workers=1)
@@ -524,6 +580,7 @@ class MainWindow(QMainWindow):
         executor.shutdown(wait=False)
 
     def _on_login_test_finished(self, task_name: str, result: object) -> None:
+        """登录测试完成提示（成败详情见运行日志）。"""
         self.footer_status.setText("登录测试完成")
         QMessageBox.information(
             self,
@@ -532,6 +589,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_login_test_error(self, task_name: str, error_msg: str) -> None:
+        """登录测试线程抛异常时的错误提示。"""
         self.footer_status.setText("登录测试失败")
         QMessageBox.critical(self, "错误", f"校园网登录测试失败：{error_msg}")
 
@@ -555,6 +613,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def show_about(self) -> None:
+        """弹出"关于"对话框（F1）。"""
         AboutDialog(self).exec()
 
     def show_calendar(self) -> None:
@@ -573,6 +632,7 @@ class MainWindow(QMainWindow):
         info("main", "已显示主窗口")
 
     def _real_close(self) -> None:
+        """真实退出：置强制退出标志后触发 closeEvent 走完整清理流程。"""
         self._force_quit = True
         self.close()
 
@@ -581,7 +641,13 @@ class MainWindow(QMainWindow):
         self._real_close()
 
     def closeEvent(self, event: QCloseEvent | None) -> None:
+        """关闭事件分流：托盘可用时隐藏驻留，否则走真实退出清理。
+
+        真实退出流程：确认有任务运行 → 取消/关闭所有 executor →
+        恢复 stdout/stderr → 显式退出事件循环（托盘驻留时必需）。
+        """
         assert event is not None
+        # 未点"退出"而只是点窗口关闭按钮：最小化到托盘继续运行
         if not self._force_quit and self._tray.is_available():
             self.hide()
             self._tray.notify("校园网自动登录", "程序已最小化到系统托盘，右键可退出")

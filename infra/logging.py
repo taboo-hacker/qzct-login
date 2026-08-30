@@ -2,6 +2,20 @@
 日志系统模块（基于 Loguru）
 
 提供日志器初始化、日志级别映射、输出流重定向等功能。
+
+分层说明：
+    utils/logger.py —— Loguru 底层配置（sink / 轮转 / 权限），不依赖 PySide6；
+    gui/log_sink.py —— GUI 日志投递（跨线程 Signal）；
+    本模块 —— 面向业务的 Logger 门面（facade），统一 ``info("模块名", "消息")``
+    风格调用，业务代码只 import 本模块的模块级函数。
+
+使用方式（业务代码推荐）：
+
+    from infra.logging import info, error
+    info("services.wifi", "WiFi连接成功")
+
+日志文件落盘位置见 core/constants.py 的 LOG_FILE（~/.qzct/qzct.log），
+轮转与保留策略在 Logger.__init__ 中换算后交给 utils/logger.setup_logger。
 """
 
 import sys
@@ -12,6 +26,7 @@ from utils.logger import setup_logger
 # ==========================================
 # 类型定义
 # ==========================================
+# 项目内部统一用整数级别（0-4），映射到 loguru 的字符串级别
 LogLevel = int
 
 LOG_LEVEL_MAP: dict[int, str] = {
@@ -22,6 +37,7 @@ LOG_LEVEL_MAP: dict[int, str] = {
     4: "CRITICAL",
 }
 
+# 全局 Logger 单例：init_logger() 创建；模块级 debug/info/... 均经由它
 logger: Optional["Logger"] = None
 
 
@@ -53,6 +69,9 @@ class Logger:
         global logger
         logger = self
 
+        # 换算为 loguru 的策略字符串：
+        # max_log_size → 轮转阈值（如 "5 MB"）；
+        # backup_count × 7 天 → 保留时长（近似"每个备份留一周"的语义）
         max_size_mb = max_log_size / (1024 * 1024)
         rotation_str = f"{max_size_mb:.0f} MB"
         retention_days = backup_count * 7

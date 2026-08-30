@@ -113,7 +113,8 @@ qzct-login/
 │   └── widgets/                # 组件（calendar_view / 列表编辑器 / 规则组件）
 ├── utils/                      # 工具模块
 │   ├── version.py              # 版本读取（frozen 模式从 _MEIPASS）
-│   └── logger.py               # Loguru 封装
+│   ├── logger.py               # Loguru 封装
+│   └── single_instance.py      # 单实例控制（QLocalServer 命名管道）
 └── tests/                      # 测试（295+ 用例，pytest + pytest-qt）
 ```
 

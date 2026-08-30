@@ -1,6 +1,11 @@
 """
 日期规则组件模块
-使用主题系统和组件工厂重构的日期规则编辑组件
+
+设置页"日期规则"标签页的主体：编辑 DATE_RULES 配置，包含三部分：
+    1. "启用自定义日期规则"总开关（启用后完全按用户规则判定，优先级最高）
+    2. 每周执行日复选（周一~周日）
+    3. 自定义区间规则表（工作日=强制执行 / 假期=强制跳过）
+基于 BaseListEditorWidget 骨架；判定逻辑见 core/date_rules.py。
 """
 
 from typing import Any
@@ -17,17 +22,17 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import DEFAULT_CONFIG, WEEKDAY_MAPPING, global_config
-from gui.dialogs.period_edit_dialog import PeriodEditDialog
 from gui.styling.widgets import create_button, create_card_widget, create_section_title
 from gui.widgets.base_list_editor import BaseListEditorWidget
 
 
 class DateRuleWidget(BaseListEditorWidget):
-    """日期规则组件"""
+    """自定义日期规则编辑组件（开关 + 每周执行日 + 区间规则表）。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         self.date_rules: dict[str, Any] = dict(global_config.get("DATE_RULES", {}))
 
+        # 兜底补齐子字段，避免旧配置缺键导致 KeyError
         for key in ("CUSTOM_HOLIDAY_PERIODS", "CUSTOM_WORKDAY_PERIODS", "WEEKLY_EXECUTE_DAYS"):
             if key not in self.date_rules:
                 self.date_rules[key] = DEFAULT_CONFIG["DATE_RULES"].get(key, [])
@@ -43,7 +48,8 @@ class DateRuleWidget(BaseListEditorWidget):
         )
 
     def _setup_edit_area(self, layout: QVBoxLayout) -> None:
-        # 启用/禁用复选框
+        """覆盖基类：总开关 + 每周执行日复选 + 带类型下拉的添加表单。"""
+        # 启用/禁用复选框（不勾选时下面的规则不生效，走默认判定）
         enable_layout = QHBoxLayout()
         self.enable_checkbox = QCheckBox("启用自定义日期规则")
         self.enable_checkbox.setChecked(self.date_rules.get("ENABLE_CUSTOM_RULE", False))
@@ -97,6 +103,7 @@ class DateRuleWidget(BaseListEditorWidget):
         return combined
 
     def _set_items(self, items: list[dict[str, Any]]) -> None:
+        """按 _type 标记把合并列表拆回工作日/假期两个配置键。"""
         workday_rules = [
             {k: v for k, v in item.items() if k != "_type"}
             for item in items
@@ -111,6 +118,7 @@ class DateRuleWidget(BaseListEditorWidget):
         self.date_rules["CUSTOM_HOLIDAY_PERIODS"] = holiday_rules
 
     def _row_to_cells(self, item: dict[str, Any]) -> list[QTableWidgetItem]:
+        """渲染一行：名称 / 开始 / 结束 / 类型（工作日或假期）。"""
         type_label = "工作日" if item.get("_type") == "workday" else "假期"
         return [
             QTableWidgetItem(item.get("name", "")),
@@ -120,6 +128,11 @@ class DateRuleWidget(BaseListEditorWidget):
         ]
 
     def _add_item(self) -> None:
+        """弹窗录入区间，按类型下拉分别追加到工作日/假期规则。"""
+        # 函数内延迟导入：widgets 与 dialogs 互有引用（settings_panel 反向引 widgets），
+        # 顶部导入会形成包级循环依赖，靠导入顺序侥幸成立（与 holiday_widget 一致）
+        from gui.dialogs.period_edit_dialog import PeriodEditDialog
+
         dialog = PeriodEditDialog(self)
         if dialog.exec() and dialog.result_period:
             rule_type = self.type_combo.currentData() if self.type_combo else "workday"
@@ -132,6 +145,9 @@ class DateRuleWidget(BaseListEditorWidget):
                 self.date_rules.setdefault("CUSTOM_HOLIDAY_PERIODS", []).append(new_rule)
 
     def _edit_item(self, row: int) -> None:
+        """弹窗编辑指定行（类型保持不变，只改名称与起止日期）。"""
+        from gui.dialogs.period_edit_dialog import PeriodEditDialog
+
         items = self._get_items()
         if row >= len(items):
             QMessageBox.warning(self, "提示", "规则索引无效")
@@ -161,7 +177,7 @@ class DateRuleWidget(BaseListEditorWidget):
         return "确定要清空所有自定义日期规则吗？"
 
     def save_rules(self) -> None:
-        """保存规则到配置"""
+        """保存规则到配置：收集开关与每周执行日，剥离 _type 临时标记后写回。"""
         assert self.enable_checkbox is not None
         self.date_rules["ENABLE_CUSTOM_RULE"] = self.enable_checkbox.isChecked()
         weekday_days = [

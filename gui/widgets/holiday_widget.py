@@ -1,6 +1,9 @@
 """
 基础节假日组件模块
-使用主题系统重构的节假日编辑组件
+
+设置页"节假日"标签页的主体：以表格形式编辑 HOLIDAY_PERIODS 配置
+（国务院法定假日 + 学校寒暑假），基于 BaseListEditorWidget 骨架实现。
+数据在点击"保存配置"时经 save_holidays() 写回 global_config。
 """
 
 import copy
@@ -24,9 +27,10 @@ from gui.widgets.base_list_editor import BaseListEditorWidget
 
 
 class BaseHolidayWidget(BaseListEditorWidget):
-    """基础节假日组件"""
+    """基础节假日编辑组件（表格 + 顶部内联添加表单 + 弹窗编辑）。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        # 深拷贝配置数据：面板上的编辑是"草稿"，点保存才写回 global_config
         self.holiday_periods: list[dict[str, Any]] = copy.deepcopy(
             global_config.get("HOLIDAY_PERIODS", DEFAULT_CONFIG["HOLIDAY_PERIODS"])
         )
@@ -42,6 +46,7 @@ class BaseHolidayWidget(BaseListEditorWidget):
         )
 
     def _setup_edit_area(self, layout: QVBoxLayout) -> None:
+        """覆盖基类：在表格上方添加"名称+起止日期"的内联添加表单。"""
         edit_frame = create_card_widget()
         edit_frame.setObjectName("holidayEditFrame")
         edit_layout = QHBoxLayout(edit_frame)
@@ -79,12 +84,15 @@ class BaseHolidayWidget(BaseListEditorWidget):
     # ------------------------------------------------------------------
 
     def _get_items(self) -> list[dict[str, Any]]:
+        """数据源：组件持有的节假日区间草稿列表。"""
         return self.holiday_periods
 
     def _set_items(self, items: list[dict[str, Any]]) -> None:
+        """整体写回草稿列表。"""
         self.holiday_periods = items
 
     def _row_to_cells(self, item: dict[str, Any]) -> list[QTableWidgetItem]:
+        """渲染一行：名称 / 开始日期 / 结束日期。"""
         return [
             QTableWidgetItem(item.get("name", "")),
             QTableWidgetItem(item.get("start", "")),
@@ -92,6 +100,7 @@ class BaseHolidayWidget(BaseListEditorWidget):
         ]
 
     def _add_item(self) -> None:
+        """从内联表单读取并校验后追加一条（名称必填，起止日期合法）。"""
         if self.name_edit is None or self.start_edit is None or self.end_edit is None:
             return
 
@@ -115,6 +124,7 @@ class BaseHolidayWidget(BaseListEditorWidget):
         self.name_edit.clear()
 
     def _edit_item(self, row: int) -> None:
+        """弹窗编辑指定行的区间（PeriodEditDialog，确认后写回）。"""
         if row < 0 or row >= len(self.holiday_periods):
             return
         period = self.holiday_periods[row]
@@ -136,6 +146,7 @@ class BaseHolidayWidget(BaseListEditorWidget):
             }
 
     def _sort_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """按开始日期升序排序。"""
         return sorted(items, key=lambda x: x["start"])
 
     def _get_select_warning_text(self) -> str:
@@ -145,5 +156,5 @@ class BaseHolidayWidget(BaseListEditorWidget):
         return "确定要清空所有节假日吗？"
 
     def save_holidays(self) -> None:
-        """保存节假日到配置"""
+        """保存节假日到配置（由 SettingsPanel.save_config 统一调用）。"""
         global_config["HOLIDAY_PERIODS"] = self.holiday_periods

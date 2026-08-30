@@ -53,6 +53,9 @@ QLabel[role="muted"] {{
     font-size: 9pt;
     color: {t.text_secondary};
 }}
+QLabel[role="tip"] {{
+    color: {t.text_tertiary};
+}}
 QLabel[role="badge"] {{
     font-size: 9pt;
     border-radius: 9px;
@@ -111,6 +114,10 @@ QPushButton[btnType="success"] {{
 QPushButton[btnType="success"]:hover {{
     background: {t.success_hover};
 }}
+QPushButton[btnType="success"]:disabled {{
+    background: {t.success_bg};
+    color: {t.success};
+}}
 QPushButton[btnType="danger"] {{
     background: {t.danger};
     color: #FFFFFF;
@@ -119,6 +126,10 @@ QPushButton[btnType="danger"] {{
 QPushButton[btnType="danger"]:hover {{
     background: {t.danger_hover};
 }}
+QPushButton[btnType="danger"]:disabled {{
+    background: {t.danger_bg};
+    color: {t.danger};
+}}
 QPushButton[btnType="warning"] {{
     background: {t.warning};
     color: #FFFFFF;
@@ -126,6 +137,10 @@ QPushButton[btnType="warning"] {{
 }}
 QPushButton[btnType="warning"]:hover {{
     background: {t.warning_hover};
+}}
+QPushButton[btnType="warning"]:disabled {{
+    background: {t.warning_bg};
+    color: {t.warning};
 }}
 QPushButton[btnType="gray"] {{
     background: {t.hover_bg};

@@ -5,7 +5,7 @@ SettingsDialog 为 SettingsPanel 的对话框包装（兼容旧调用方与测�
 主窗口内已改用嵌入式"设置"标签页，不再弹窗。
 """
 
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from gui.dialogs.settings_panel import SettingsPanel
 
@@ -31,9 +31,9 @@ class SettingsDialog(QDialog):
         """获取主题显示名称（转发到面板）"""
         return self._panel._get_theme_display_name(theme_name)
 
-    def toggle_password_visibility(self, password_edit: object, button: object) -> None:
-        """切换密码可见性（转发到面板）"""
-        self._panel.toggle_password_visibility(password_edit, button)  # type: ignore[arg-type]
+    def toggle_password_visibility(self, password_edit: QLineEdit, button: QPushButton) -> None:
+        """切换密码可见性（转发到面板；参数类型与面板方法保持一致）"""
+        self._panel.toggle_password_visibility(password_edit, button)
 
     def _on_theme_changed(self, index: int) -> None:
         """主题切换处理（转发到面板）"""
