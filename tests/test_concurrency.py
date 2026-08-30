@@ -1,7 +1,13 @@
 """
-concurrency.py 模块测试
+infra/concurrency.py 模块测试
 
-测试任务执行器、任务链、任务装饰器等功能。
+测试并发框架的四个核心组件：
+- TaskContext：任务上下文（日志、取消标志）；
+- @task 装饰器：为函数附加 task_name 元数据；
+- TaskExecutor：线程池执行器（提交、取消、线程数）；
+- TaskChain：流式任务链（add/on_success/on_error、顺序执行、失败中断、
+  CHAIN_BREAK_KEY 提前成功终止、执行中 shutdown 的安全性）。
+集成用例依赖 Qt 信号，通过"泵 processEvents + 轮询 Event"等待异步回调。
 """
 
 import threading
@@ -19,15 +25,15 @@ from infra.concurrency import (
 
 
 def _ensure_qapp() -> QApplication:
-    """确保存在 QApplication 实例（Qt 信号机制所必需）。"""
+    """模块级辅助函数：确保存在 QApplication 实例（Qt 信号机制所必需）。"""
     return QApplication.instance() or QApplication([])
 
 
 class TestTaskContext:
-    """任务上下文测试"""
+    """TaskContext 测试：初始化状态、日志追加与取消标志。"""
 
     def test_context_initialization(self):
-        """测试上下文初始化"""
+        """新建上下文应记录任务名，且取消标志与日志列表为初始空状态。"""
         ctx = TaskContext("test_task")
 
         assert ctx.task_name == "test_task"
@@ -35,7 +41,7 @@ class TestTaskContext:
         assert ctx._logs == []
 
     def test_log(self):
-        """测试日志记录"""
+        """log() 应按调用顺序把消息追加到内部日志列表。"""
         ctx = TaskContext("test")
         ctx.log("message 1")
         ctx.log("message 2")
@@ -45,7 +51,7 @@ class TestTaskContext:
         assert ctx._logs[1] == "message 2"
 
     def test_get_logs(self):
-        """测试获取日志"""
+        """get_logs() 应返回日志副本而非内部列表引用（防止外部篡改）。"""
         ctx = TaskContext("test")
         ctx.log("message")
         logs = ctx.get_logs()
@@ -54,7 +60,7 @@ class TestTaskContext:
         assert logs is not ctx._logs
 
     def test_cancel(self):
-        """测试取消任务"""
+        """cancel() 调用后 is_cancelled() 应由 False 翻转为 True。"""
         ctx = TaskContext("test")
 
         assert ctx.is_cancelled() is False
@@ -63,10 +69,10 @@ class TestTaskContext:
 
 
 class TestTaskDecorator:
-    """任务装饰器测试"""
+    """@task 装饰器测试：元数据注入与直接调用执行。"""
 
     def test_task_decorator(self):
-        """测试任务装饰器"""
+        """被 @task 装饰的函数应携带 task_name 属性。"""
 
         @task("测试任务")
         def sample_task(ctx: TaskContext) -> dict:
@@ -77,7 +83,7 @@ class TestTaskDecorator:
         assert sample_task.task_name == "测试任务"
 
     def test_task_execution(self):
-        """测试任务执行"""
+        """直接调用被装饰函数应正常执行并写入上下文日志。"""
 
         @task("执行测试任务", timeout=30)
         def executing_task(ctx: TaskContext) -> dict:
@@ -92,10 +98,10 @@ class TestTaskDecorator:
 
 
 class TestTaskExecutor:
-    """任务执行器测试"""
+    """TaskExecutor 测试：线程池初始化、任务提交与批量取消。"""
 
     def test_executor_initialization(self):
-        """测试执行器初始化"""
+        """新建执行器应有正的线程数上限与空的任务/上下文表。"""
         executor = TaskExecutor()
 
         assert executor._max_workers > 0
@@ -103,12 +109,12 @@ class TestTaskExecutor:
         assert executor._contexts == {}
 
     def test_executor_max_workers(self):
-        """测试最大工作线程数"""
+        """显式传入 max_workers=4 时应按该值生效。"""
         executor = TaskExecutor(max_workers=4)
         assert executor.max_workers == 4
 
     def test_submit_task(self):
-        """测试提交任务"""
+        """submit() 应返回非 None 的 Future 对象。"""
         executor = TaskExecutor()
 
         @task("提交测试")
@@ -119,7 +125,7 @@ class TestTaskExecutor:
         assert future is not None
 
     def test_cancel_all(self):
-        """测试取消所有任务"""
+        """cancel_all() 应给所有已注册上下文设置取消标志。"""
         executor = TaskExecutor()
 
         @task("取消测试")
@@ -131,6 +137,7 @@ class TestTaskExecutor:
         executor.cancel_all()
 
         # 验证所有 context 的 cancel 标志已设置
+        # （加锁读取，避免与工作线程修改contexts 的竞争）
         with executor._lock:
             for ctx in executor._contexts.values():
                 assert ctx.is_cancelled()
@@ -138,10 +145,10 @@ class TestTaskExecutor:
 
 
 class TestTaskChain:
-    """任务链测试"""
+    """TaskChain 测试：链的构建 API（add/回调注册/流式串联）。"""
 
     def test_chain_initialization(self):
-        """测试任务链初始化"""
+        """新建任务链的步骤列表与成功/失败回调均应为空。"""
         chain = TaskChain()
 
         assert chain._steps == []
@@ -149,7 +156,7 @@ class TestTaskChain:
         assert chain._on_error_callback is None
 
     def test_chain_add(self):
-        """测试添加任务到链"""
+        """add() 应记录步骤并返回链自身以支持链式调用。"""
 
         @task("步骤1")
         def step1(ctx: TaskContext) -> dict:
@@ -163,7 +170,7 @@ class TestTaskChain:
         assert chain._steps[0]["name"] == "步骤1"
 
     def test_chain_on_success(self):
-        """测试成功回调"""
+        """on_success() 应注册成功回调并返回链自身。"""
 
         def success_handler(success, results):
             pass
@@ -175,7 +182,7 @@ class TestTaskChain:
         assert chain._on_success_callback is success_handler
 
     def test_chain_on_error(self):
-        """测试错误回调"""
+        """on_error() 应注册失败回调并返回链自身。"""
 
         def error_handler(results):
             pass
@@ -187,7 +194,7 @@ class TestTaskChain:
         assert chain._on_error_callback is error_handler
 
     def test_chain_fluent_api(self):
-        """测试流式 API"""
+        """add/on_success/on_error 连缀成流式调用后应得到两步任务链。"""
 
         @task("步骤A")
         def step_a(ctx: TaskContext) -> dict:
@@ -209,10 +216,10 @@ class TestTaskChain:
 
 
 class TestTaskChainExecute:
-    """TaskChain.execute() 集成测试"""
+    """TaskChain.execute() 集成测试：异步顺序执行、失败中断与安全关闭。"""
 
     def test_chain_execute_sequential_success(self, qtbot):
-        """测试多个任务顺序执行成功"""
+        """三个步骤顺序执行成功后，on_success 应收到各步骤的完整结果。"""
         _ensure_qapp()
 
         @task("步骤1")
@@ -248,7 +255,8 @@ class TestTaskChainExecute:
 
         executor = chain.execute()
         try:
-            # 轮询事件循环，等待回调触发
+            # 回调经 Qt 信号（QueuedConnection）投递到主线程，
+            # 必须边泵事件循环边轮询，否则 done 永远不会被置位
             timeout = 10.0
             elapsed = 0.0
             interval = 0.05
@@ -269,7 +277,7 @@ class TestTaskChainExecute:
             executor.shutdown(wait=False)
 
     def test_chain_execute_failure_breaks_chain(self, qtbot):
-        """测试任务失败后中断后续任务"""
+        """中间步骤抛异常时应触发 on_error，后续步骤不再执行。"""
         _ensure_qapp()
 
         @task("成功步骤")
@@ -324,7 +332,7 @@ class TestTaskChainExecute:
             executor.shutdown(wait=False)
 
     def test_chain_execute_empty_steps(self):
-        """测试空任务链直接调用 on_success"""
+        """空任务链 execute() 不创建 executor，直接同步回调 on_success。"""
         _ensure_qapp()
 
         captured = {}
@@ -378,6 +386,7 @@ class TestTaskChainExecute:
                 elapsed += 0.05
 
             assert done.is_set(), "on_success 回调未在超时内触发"
+            # chain_break 属于"成功"终止：success=True，但后续步骤未运行
             assert captured["success"] is True
             assert executed == ["条件检查"]
             assert "条件检查" in captured["results"]

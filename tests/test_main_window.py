@@ -1,8 +1,9 @@
 """
 gui/main_window.py 冒烟测试
 
-MainWindow 构造需要加载配置、初始化日志与托盘，测试中全部打桩，
-仅验证新布局下的关键控件存在与主题应用流程。
+MainWindow 构造需要加载配置、初始化日志与托盘，测试中全部打桩
+（patch load_config / init_logger / TrayManager），
+仅验证新布局下的关键控件存在、设置面板回显与状态徽标刷新流程。
 """
 
 import sys
@@ -11,19 +12,21 @@ from PySide6.QtWidgets import QApplication
 
 
 def _ensure_qapp() -> QApplication:
+    """模块级辅助函数：确保 QApplication 实例存在（qtbot 之外的兜底初始化）。"""
     return QApplication.instance() or QApplication([])
 
 
 class TestMainWindowSmoke:
-    """主窗口冒烟测试"""
+    """主窗口冒烟测试：构造流程、配置回显、状态显示三大场景。"""
 
     def test_constructs_with_layout_widgets(self, qtbot):
-        """构造主窗口并验证两栏布局的关键控件存在"""
+        """构造主窗口成功后，两栏布局与三个标签页的关键控件应全部存在。"""
         _ensure_qapp()
         from unittest.mock import patch
 
         from gui.main_window import MainWindow
 
+        # 暂存标准流：Qt/托盘可能在 C++ 层写 stderr，测试环境需原样恢复
         original_out, original_err = sys.stdout, sys.stderr
         window = None
         try:
@@ -60,13 +63,14 @@ class TestMainWindowSmoke:
                 window.deleteLater()
 
     def test_settings_panel_reflects_loaded_config(self, qtbot, tmp_path, monkeypatch):
-        """设置面板显示加载后的配置值（回归：曾因构建顺序颠倒显示默认空值）"""
+        """设置面板应回显从磁盘加载的配置值（回归：曾因构建顺序颠倒显示默认空值）。"""
         _ensure_qapp()
         import json
         from unittest.mock import patch
 
         import core.config as cfg_module
 
+        # 将 CONFIG_DIR/CONFIG_FILE 指向临时目录并写入测试配置，验证真实加载链路
         monkeypatch.setattr(cfg_module, "CONFIG_DIR", str(tmp_path))
         monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(tmp_path / "config.json"))
         (tmp_path / "config.json").write_text(
@@ -105,7 +109,7 @@ class TestMainWindowSmoke:
                 window.deleteLater()
 
     def test_status_badge_state_reflects_need_work(self, qtbot):
-        """状态徽标 state 属性随需执行状态变化"""
+        """should_work_today 返回 False/True 时，状态徽标应分别显示休息/工作态。"""
         _ensure_qapp()
         from unittest.mock import patch
 
@@ -127,6 +131,7 @@ class TestMainWindowSmoke:
                 assert window.status_badge.property("state") == "rest"
                 assert "无需执行" in window.status_badge.text()
 
+            # 复用同一窗口，切换 should_work_today 的返回值验证徽标随之更新
             with patch("gui.main_window.should_work_today", return_value=True):
                 window._update_status_display()
                 assert window.status_badge.property("state") == "work"

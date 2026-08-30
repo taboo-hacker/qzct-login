@@ -1,7 +1,10 @@
 """
 D2 测试：Config Schema 验证
 
-测试 validate_config() 函数对各类字段类型、值域、缺失字段、嵌套结构的校验行为。
+测试 validate_config() 函数对各类字段类型、值域、缺失字段、
+嵌套结构（DATE_RULES）的校验行为。
+策略：以 deepcopy(DEFAULT_CONFIG) 为基线，逐项注入非法值后断言
+字段被修复且函数返回被修复字段名列表（原地修改 + 返回修复清单）。
 """
 
 import copy
@@ -13,7 +16,7 @@ from core.config_validator import validate_config
 
 
 class TestValidateConfigValid:
-    """合法配置不应修改任何字段"""
+    """合法配置不应修改任何字段（validate_config 原地校验，返回空修复列表）。"""
 
     def test_valid_config_no_changes(self):
         """合法的默认配置不应触发任何修复"""
@@ -42,7 +45,7 @@ class TestValidateConfigValid:
 
 
 class TestValidateConfigTypeErrors:
-    """类型错误应回退到默认值"""
+    """类型错误应回退到默认值（bool->int 特例：1/0 转换而非回退）。"""
 
     def test_int_field_receives_string(self):
         """int 字段收到 string 应回退"""
@@ -63,7 +66,7 @@ class TestValidateConfigTypeErrors:
         assert config["WIFI_NAME"] == DEFAULT_CONFIG["WIFI_NAME"]
 
     def test_bool_field_receives_int(self):
-        """bool 字段收到 int 应转换为 bool"""
+        """bool 字段收到 int 应转换为 bool（JSON 里 true/false 可能存成 1/0）"""
         config = copy.deepcopy(DEFAULT_CONFIG)
         config["AUTOSTART"] = 1
 
@@ -72,7 +75,7 @@ class TestValidateConfigTypeErrors:
         assert config["AUTOSTART"] is True
 
     def test_int_field_receives_bool(self):
-        """int 字段收到 bool 应回退"""
+        """int 字段收到 bool 应回退（bool 是 int 子类，需显式排除）"""
         config = copy.deepcopy(DEFAULT_CONFIG)
         config["MAX_WIFI_RETRY"] = True
 
@@ -91,11 +94,11 @@ class TestValidateConfigTypeErrors:
 
 
 class TestValidateConfigValueRange:
-    """值域不合法应回退到默认值"""
+    """值域不合法应回退到默认值（小时/分钟/枚举/格式等参数化边界）。"""
 
     @pytest.mark.parametrize("hour", [-1, 24, 25, 100])
     def test_shutdown_hour_out_of_range(self, hour):
-        """SHUTDOWN_HOUR 超出 0-23 应回退"""
+        """SHUTDOWN_HOUR 超出 0-23 应回退（含 -1/24 两个紧邻边界）"""
         config = copy.deepcopy(DEFAULT_CONFIG)
         config["SHUTDOWN_HOUR"] = hour
 
@@ -105,7 +108,7 @@ class TestValidateConfigValueRange:
 
     @pytest.mark.parametrize("minute", [-1, 60, 61, 100])
     def test_shutdown_min_out_of_range(self, minute):
-        """SHUTDOWN_MIN 超出 0-59 应回退"""
+        """SHUTDOWN_MIN 超出 0-59 应回退（含 -1/60 两个紧邻边界）"""
         config = copy.deepcopy(DEFAULT_CONFIG)
         config["SHUTDOWN_MIN"] = minute
 
@@ -152,7 +155,7 @@ class TestValidateConfigValueRange:
 
 
 class TestValidateConfigMissingFields:
-    """缺失字段应补充默认值"""
+    """缺失字段应补充默认值（顶层字段与整个嵌套节）。"""
 
     def test_missing_top_level_field(self):
         """缺失顶级字段应补充"""
@@ -176,7 +179,7 @@ class TestValidateConfigMissingFields:
         assert "SHUTDOWN_HOUR" in fixed
 
     def test_missing_date_rules_entirely(self):
-        """DATE_RULES 完全缺失应重置"""
+        """DATE_RULES 完全缺失应重置为含全部子键的默认结构"""
         config = copy.deepcopy(DEFAULT_CONFIG)
         del config["DATE_RULES"]
 
@@ -187,7 +190,7 @@ class TestValidateConfigMissingFields:
 
 
 class TestValidateConfigDateRulesNested:
-    """DATE_RULES 嵌套结构校验"""
+    """DATE_RULES 嵌套结构校验：整体类型、子字段缺失与子字段非法值。"""
 
     def test_date_rules_wrong_type(self):
         """DATE_RULES 为非 dict 应重置"""
@@ -208,7 +211,7 @@ class TestValidateConfigDateRulesNested:
         assert "ENABLE_CUSTOM_RULE" in config["DATE_RULES"]
 
     def test_weekly_execute_days_invalid_element(self):
-        """WEEKLY_EXECUTE_DAYS 包含非法元素应回退"""
+        """WEEKLY_EXECUTE_DAYS 包含非法元素（8 超出 0-6）应回退"""
         config = copy.deepcopy(DEFAULT_CONFIG)
         config["DATE_RULES"]["WEEKLY_EXECUTE_DAYS"] = [0, 1, 8]  # 8 超出范围
 
@@ -245,7 +248,7 @@ class TestValidateConfigDateRulesNested:
 
 
 class TestValidateConfigReturnList:
-    """返回值是修复字段名列表"""
+    """返回值是修复字段名列表（用于日志记录哪些字段被自动修复）。"""
 
     def test_returns_list(self):
         """返回值应为 list"""

@@ -1,7 +1,12 @@
 """
 core 包模块测试
 
-测试配置管理、日期判断、农历等功能。
+测试三块核心逻辑：
+- LunarUtils：公历转农历、节气、节日、完整农历信息；
+- 配置管理：get_config_snapshot 的快照与深拷贝语义；
+- 日期规则 should_work_today：工作日/周末/节假日/调休/自定义规则的优先级组合。
+日期规则用例通过覆写 global_config 控制输入，conftest 的
+reset_global_config autouse fixture 负责测试后还原全局配置。
 """
 
 import datetime
@@ -12,10 +17,10 @@ from core.lunar import LunarUtils
 
 
 class TestLunarUtils:
-    """农历工具类测试"""
+    """农历工具类测试：公历/农历转换、节气与节日查询。"""
 
     def test_solar_to_lunar(self):
-        """测试公历转农历"""
+        """公历 2026-01-01 应转换为农历 2025 年冬月十三。"""
         date = datetime.date(2026, 1, 1)
         result = LunarUtils.solar_to_lunar(date)
 
@@ -29,31 +34,31 @@ class TestLunarUtils:
         assert result["lunar_day"] == 13
 
     def test_get_solar_term(self):
-        """测试获取节气"""
+        """公历 2026-02-04 应查询到节气"立春"。"""
         li_chun = datetime.date(2026, 2, 4)
         result = LunarUtils.get_solar_term(li_chun)
         assert result == "立春"
 
     def test_get_solar_term_not_solar_term(self):
-        """测试非节气日期"""
+        """非节气日期（2026-01-15）应返回空字符串。"""
         normal_day = datetime.date(2026, 1, 15)
         result = LunarUtils.get_solar_term(normal_day)
         assert result == ""
 
     def test_get_festivals_solar(self):
-        """测试获取公历节日"""
+        """公历 2026-01-01 的公历节日列表应包含"元旦"。"""
         new_year = datetime.date(2026, 1, 1)
         result = LunarUtils.get_festivals(new_year)
         assert "元旦" in result["solar"]
 
     def test_get_festivals_traditional(self):
-        """测试获取传统节日"""
+        """春节（2026-02-17）应至少命中一个传统或公历节日。"""
         spring_festival = datetime.date(2026, 2, 17)
         result = LunarUtils.get_festivals(spring_festival)
         assert len(result["traditional"]) > 0 or len(result["solar"]) > 0
 
     def test_get_lunar_info(self):
-        """测试获取完整农历信息"""
+        """get_lunar_info 应返回含农历日期、节气、节日、宜忌的完整字典。"""
         date = datetime.date(2026, 1, 1)
         result = LunarUtils.get_lunar_info(date)
 
@@ -65,10 +70,10 @@ class TestLunarUtils:
 
 
 class TestConfigManagement:
-    """配置管理测试"""
+    """配置管理测试：get_config_snapshot 的返回语义。"""
 
     def test_get_config_snapshot(self, sample_config):
-        """测试获取配置快照"""
+        """快照内容应与 global_config 一致，但不是同一对象引用。"""
 
         global_config.clear()
         global_config.update(sample_config)
@@ -79,7 +84,7 @@ class TestConfigManagement:
         assert snapshot is not global_config
 
     def test_get_config_snapshot_is_deep_copy(self, sample_config):
-        """测试配置快照是深拷贝"""
+        """修改快照不应影响 global_config（深拷贝语义）。"""
 
         global_config.clear()
         global_config.update(sample_config)
@@ -91,10 +96,10 @@ class TestConfigManagement:
 
 
 class TestDateRules:
-    """日期规则测试"""
+    """日期规则测试：should_work_today 在各类日历场景下的判定。"""
 
     def test_should_work_today_weekday(self, sample_config):
-        """测试普通工作日"""
+        """默认规则下普通周一（2026-01-05）应判定为需要执行任务。"""
 
         global_config.clear()
         global_config.update(sample_config)
@@ -104,7 +109,7 @@ class TestDateRules:
         assert result is True
 
     def test_should_work_today_weekend(self, sample_config):
-        """测试周末"""
+        """默认规则下周末（周六/周日）应判定为不执行任务。"""
 
         # sample_config 把 2026-01-04 设为调休工作日，与"周末休息"用例冲突；
         # 这里清空调休列表，让测试单独检验周末规则。
@@ -121,7 +126,7 @@ class TestDateRules:
         assert should_work_today(sunday) is False
 
     def test_should_work_today_holiday(self, sample_config):
-        """测试节假日"""
+        """日期落在 HOLIDAY_PERIODS 节假日区间内时应判定为不执行。"""
 
         config = sample_config.copy()
         config["HOLIDAY_PERIODS"] = [
@@ -135,7 +140,7 @@ class TestDateRules:
         assert result is False
 
     def test_should_work_today_compensatory_workday(self, sample_config):
-        """测试调休上班日"""
+        """周末调休上班日（COMPENSATORY_WORKDAYS）应判定为执行。"""
 
         config = sample_config.copy()
         config["COMPENSATORY_WORKDAYS"] = ["2026-01-04"]
@@ -147,7 +152,7 @@ class TestDateRules:
         assert result is True
 
     def test_should_work_today_custom_rule_enabled(self, sample_config):
-        """测试启用自定义规则"""
+        """启用自定义规则后按 WEEKLY_EXECUTE_DAYS 与自定义假期判定。"""
 
         config = sample_config.copy()
         config["DATE_RULES"] = {
@@ -215,17 +220,17 @@ class TestDateRules:
 
 
 class TestISPMapping:
-    """ISP 映射测试"""
+    """ISP 映射测试：ISP_MAPPING 常量的键值完整性。"""
 
     def test_isp_mapping_exists(self):
-        """测试 ISP 映射存在"""
+        """映射表应包含移动/电信/联通/本地四种 ISP 键。"""
         assert "cmcc" in ISP_MAPPING
         assert "telecom" in ISP_MAPPING
         assert "unicom" in ISP_MAPPING
         assert "local" in ISP_MAPPING
 
     def test_isp_mapping_values(self):
-        """测试 ISP 映射值"""
+        """每个 ISP 键应映射到对应的登录账号后缀字符串。"""
         assert ISP_MAPPING["cmcc"] == "@cmcc"
         assert ISP_MAPPING["telecom"] == "@telecom"
         assert ISP_MAPPING["unicom"] == "@unicom"

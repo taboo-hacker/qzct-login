@@ -1,8 +1,10 @@
 """
 infra 包模块测试
 
-测试工具函数、日志系统等功能。
-线程池管理测试已移至 test_gui.py（因依赖 PySide6）。
+测试日期工具（parse_date_str / is_date_in_period / format_period）、
+Logger 日志封装与 StreamRedirector 输出流重定向。
+通过 patch infra.logging.setup_logger 与 infra.logging.logger
+隔离真实日志输出。线程池管理测试已移至 test_gui.py（因依赖 PySide6）。
 """
 
 import datetime
@@ -19,39 +21,39 @@ from infra import (
 
 
 class TestParseDateStr:
-    """日期字符串解析测试"""
+    """parse_date_str 测试：有效/无效格式、越界日期与空值输入。"""
 
     def test_parse_valid_date(self):
-        """测试解析有效日期"""
+        """合法的 YYYY-MM-DD 字符串应解析为对应 date 对象。"""
         result = parse_date_str("2026-01-15")
         assert result == datetime.date(2026, 1, 15)
 
     def test_parse_invalid_format(self):
-        """测试解析无效格式"""
+        """使用斜杠分隔的非法格式应返回 None。"""
         result = parse_date_str("2026/01/15")
         assert result is None
 
     def test_parse_invalid_date(self):
-        """测试解析无效日期"""
+        """格式正确但数值越界的日期（13 月 45 日）应返回 None。"""
         result = parse_date_str("2026-13-45")
         assert result is None
 
     def test_parse_empty_string(self):
-        """测试解析空字符串"""
+        """空字符串应返回 None。"""
         result = parse_date_str("")
         assert result is None
 
     def test_parse_none(self):
-        """测试解析 None"""
+        """传入 None 应安全返回 None 而不抛异常。"""
         result = parse_date_str(None)
         assert result is None
 
 
 class TestIsDateInPeriod:
-    """日期期间判断测试"""
+    """is_date_in_period 测试：期间内外、起止边界及非法期间数据。"""
 
     def test_date_in_period(self):
-        """测试日期在期间内"""
+        """日期落在期间中间时应返回 True。"""
         period = {"start": "2026-01-01", "end": "2026-01-31", "name": "测试期间"}
         check_date = datetime.date(2026, 1, 15)
 
@@ -59,7 +61,7 @@ class TestIsDateInPeriod:
         assert result is True
 
     def test_date_at_start(self):
-        """测试日期在开始边界"""
+        """边界值：日期等于期间起始日时应返回 True（闭区间）。"""
         period = {"start": "2026-01-01", "end": "2026-01-31"}
         check_date = datetime.date(2026, 1, 1)
 
@@ -67,7 +69,7 @@ class TestIsDateInPeriod:
         assert result is True
 
     def test_date_at_end(self):
-        """测试日期在结束边界"""
+        """边界值：日期等于期间结束日时应返回 True（闭区间）。"""
         period = {"start": "2026-01-01", "end": "2026-01-31"}
         check_date = datetime.date(2026, 1, 31)
 
@@ -75,7 +77,7 @@ class TestIsDateInPeriod:
         assert result is True
 
     def test_date_before_period(self):
-        """测试日期在期间前"""
+        """日期早于期间起始时应返回 False。"""
         period = {"start": "2026-01-10", "end": "2026-01-20"}
         check_date = datetime.date(2026, 1, 5)
 
@@ -83,7 +85,7 @@ class TestIsDateInPeriod:
         assert result is False
 
     def test_date_after_period(self):
-        """测试日期在期间后"""
+        """日期晚于期间结束时应返回 False。"""
         period = {"start": "2026-01-10", "end": "2026-01-20"}
         check_date = datetime.date(2026, 1, 25)
 
@@ -91,7 +93,7 @@ class TestIsDateInPeriod:
         assert result is False
 
     def test_invalid_period_start(self):
-        """测试无效期间开始日期"""
+        """期间 start 字段非法时应返回 False 而不抛异常。"""
         period = {"start": "invalid", "end": "2026-01-31"}
         check_date = datetime.date(2026, 1, 15)
 
@@ -99,7 +101,7 @@ class TestIsDateInPeriod:
         assert result is False
 
     def test_invalid_period_end(self):
-        """测试无效期间结束日期"""
+        """期间 end 字段非法时应返回 False 而不抛异常。"""
         period = {"start": "2026-01-01", "end": "invalid"}
         check_date = datetime.date(2026, 1, 15)
 
@@ -108,10 +110,10 @@ class TestIsDateInPeriod:
 
 
 class TestFormatPeriod:
-    """期间格式化测试"""
+    """format_period 测试：期间字典转可读字符串。"""
 
     def test_format_period_full(self):
-        """测试完整期间格式化"""
+        """含 name 的期间格式化后应包含名称与起止日期。"""
         period = {"name": "寒假", "start": "2026-01-10", "end": "2026-02-28"}
         result = format_period(period)
 
@@ -120,7 +122,7 @@ class TestFormatPeriod:
         assert "2026-02-28" in result
 
     def test_format_period_no_name(self):
-        """测试无名称期间格式化"""
+        """缺失 name 字段时应显示默认名"未命名"。"""
         period = {"start": "2026-01-01", "end": "2026-01-31"}
         result = format_period(period)
 
@@ -128,16 +130,16 @@ class TestFormatPeriod:
 
 
 class TestLogger:
-    """日志系统测试"""
+    """Logger 封装测试：初始化与各级别日志转发。"""
 
     def test_logger_initialization(self):
-        """测试日志初始化"""
+        """init_logger 应返回非 None 的 Logger 实例（setup_logger 已打桩）。"""
         with patch("infra.logging.setup_logger"):
             logger = init_logger(level=1)
             assert logger is not None
 
     def test_logger_levels(self):
-        """测试日志级别"""
+        """debug/info/warning/error/critical 五个级别均应转发到底层 logger.log。"""
         with patch("infra.logging.setup_logger") as mock_setup:
             mock_logger = MagicMock()
             mock_setup.return_value = mock_logger
@@ -153,36 +155,36 @@ class TestLogger:
 
 
 class TestStreamRedirector:
-    """输出流重定向测试"""
+    """StreamRedirector 测试：stdout/stderr 桥接到日志系统的写接口行为。"""
 
     def test_write_with_content(self):
-        """测试写入内容"""
+        """写入非空内容应被转发到日志（不崩溃即通过）。"""
         with patch("infra.logging.logger", MagicMock()):
             redirector = StreamRedirector("test", 1)
             redirector.write("test message")
 
     def test_write_empty(self):
-        """测试写入空内容"""
+        """写入空串或纯空白应被静默忽略（避免无意义的空日志行）。"""
         redirector = StreamRedirector("test", 1)
         redirector.write("")
         redirector.write("   ")
 
     def test_flush(self):
-        """测试刷新"""
+        """flush 应为空操作（日志系统自行管理刷新）。"""
         redirector = StreamRedirector("test", 1)
         redirector.flush()
 
     def test_isatty(self):
-        """测试终端判断"""
+        """重定向流并非真实终端，isatty 应返回 False。"""
         redirector = StreamRedirector("test", 1)
         assert redirector.isatty() is False
 
     def test_writable(self):
-        """测试可写判断"""
+        """流角色为输出，writable 应返回 True。"""
         redirector = StreamRedirector("test", 1)
         assert redirector.writable() is True
 
     def test_readable(self):
-        """测试可读判断"""
+        """流角色为输出，readable 应返回 False。"""
         redirector = StreamRedirector("test", 1)
         assert redirector.readable() is False
