@@ -12,8 +12,10 @@ infra/concurrency.py 模块测试
 
 import threading
 import time
+from typing import Any
 
 from PySide6.QtWidgets import QApplication
+from pytestqt.qtbot import QtBot
 
 from infra.concurrency import (
     CHAIN_BREAK_KEY,
@@ -32,7 +34,7 @@ def _ensure_qapp() -> QApplication:
 class TestTaskContext:
     """TaskContext 测试：初始化状态、日志追加与取消标志。"""
 
-    def test_context_initialization(self):
+    def test_context_initialization(self) -> None:
         """新建上下文应记录任务名，且取消标志与日志列表为初始空状态。"""
         ctx = TaskContext("test_task")
 
@@ -40,7 +42,7 @@ class TestTaskContext:
         assert ctx._cancelled is False
         assert ctx._logs == []
 
-    def test_log(self):
+    def test_log(self) -> None:
         """log() 应按调用顺序把消息追加到内部日志列表。"""
         ctx = TaskContext("test")
         ctx.log("message 1")
@@ -50,7 +52,7 @@ class TestTaskContext:
         assert ctx._logs[0] == "message 1"
         assert ctx._logs[1] == "message 2"
 
-    def test_get_logs(self):
+    def test_get_logs(self) -> None:
         """get_logs() 应返回日志副本而非内部列表引用（防止外部篡改）。"""
         ctx = TaskContext("test")
         ctx.log("message")
@@ -59,7 +61,7 @@ class TestTaskContext:
         assert logs == ["message"]
         assert logs is not ctx._logs
 
-    def test_cancel(self):
+    def test_cancel(self) -> None:
         """cancel() 调用后 is_cancelled() 应由 False 翻转为 True。"""
         ctx = TaskContext("test")
 
@@ -71,7 +73,7 @@ class TestTaskContext:
 class TestTaskDecorator:
     """@task 装饰器测试：元数据注入与直接调用执行。"""
 
-    def test_task_decorator(self):
+    def test_task_decorator(self) -> None:
         """被 @task 装饰的函数应携带 task_name 属性。"""
 
         @task("测试任务")
@@ -82,7 +84,7 @@ class TestTaskDecorator:
         assert hasattr(sample_task, "task_name")
         assert sample_task.task_name == "测试任务"
 
-    def test_task_execution(self):
+    def test_task_execution(self) -> None:
         """直接调用被装饰函数应正常执行并写入上下文日志。"""
 
         @task("执行测试任务", timeout=30)
@@ -100,7 +102,7 @@ class TestTaskDecorator:
 class TestTaskExecutor:
     """TaskExecutor 测试：线程池初始化、任务提交与批量取消。"""
 
-    def test_executor_initialization(self):
+    def test_executor_initialization(self) -> None:
         """新建执行器应有正的线程数上限与空的任务/上下文表。"""
         executor = TaskExecutor()
 
@@ -108,12 +110,12 @@ class TestTaskExecutor:
         assert executor._tasks == {}
         assert executor._contexts == {}
 
-    def test_executor_max_workers(self):
+    def test_executor_max_workers(self) -> None:
         """显式传入 max_workers=4 时应按该值生效。"""
         executor = TaskExecutor(max_workers=4)
         assert executor.max_workers == 4
 
-    def test_submit_task(self):
+    def test_submit_task(self) -> None:
         """submit() 应返回非 None 的 Future 对象。"""
         executor = TaskExecutor()
 
@@ -124,7 +126,7 @@ class TestTaskExecutor:
         future = executor.submit(simple_task, "提交测试")
         assert future is not None
 
-    def test_cancel_all(self):
+    def test_cancel_all(self) -> None:
         """cancel_all() 应给所有已注册上下文设置取消标志。"""
         executor = TaskExecutor()
 
@@ -147,7 +149,7 @@ class TestTaskExecutor:
 class TestTaskChain:
     """TaskChain 测试：链的构建 API（add/回调注册/流式串联）。"""
 
-    def test_chain_initialization(self):
+    def test_chain_initialization(self) -> None:
         """新建任务链的步骤列表与成功/失败回调均应为空。"""
         chain = TaskChain()
 
@@ -155,7 +157,7 @@ class TestTaskChain:
         assert chain._on_success_callback is None
         assert chain._on_error_callback is None
 
-    def test_chain_add(self):
+    def test_chain_add(self) -> None:
         """add() 应记录步骤并返回链自身以支持链式调用。"""
 
         @task("步骤1")
@@ -169,10 +171,10 @@ class TestTaskChain:
         assert len(chain._steps) == 1
         assert chain._steps[0]["name"] == "步骤1"
 
-    def test_chain_on_success(self):
+    def test_chain_on_success(self) -> None:
         """on_success() 应注册成功回调并返回链自身。"""
 
-        def success_handler(success, results):
+        def success_handler(success: bool, results: dict[str, Any]) -> None:
             pass
 
         chain = TaskChain()
@@ -181,10 +183,10 @@ class TestTaskChain:
         assert result is chain
         assert chain._on_success_callback is success_handler
 
-    def test_chain_on_error(self):
+    def test_chain_on_error(self) -> None:
         """on_error() 应注册失败回调并返回链自身。"""
 
-        def error_handler(results):
+        def error_handler(results: dict[str, Any]) -> None:
             pass
 
         chain = TaskChain()
@@ -193,7 +195,7 @@ class TestTaskChain:
         assert result is chain
         assert chain._on_error_callback is error_handler
 
-    def test_chain_fluent_api(self):
+    def test_chain_fluent_api(self) -> None:
         """add/on_success/on_error 连缀成流式调用后应得到两步任务链。"""
 
         @task("步骤A")
@@ -218,7 +220,7 @@ class TestTaskChain:
 class TestTaskChainExecute:
     """TaskChain.execute() 集成测试：异步顺序执行、失败中断与安全关闭。"""
 
-    def test_chain_execute_sequential_success(self, qtbot):
+    def test_chain_execute_sequential_success(self, qtbot: QtBot) -> None:
         """三个步骤顺序执行成功后，on_success 应收到各步骤的完整结果。"""
         _ensure_qapp()
 
@@ -238,9 +240,9 @@ class TestTaskChainExecute:
             return {"step": 3}
 
         done = threading.Event()
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def on_success(success, results):
+        def on_success(success: bool, results: dict[str, Any]) -> None:
             captured["success"] = success
             captured["results"] = results
             done.set()
@@ -254,6 +256,8 @@ class TestTaskChainExecute:
         )
 
         executor = chain.execute()
+
+        assert executor is not None
         try:
             # 回调经 Qt 信号（QueuedConnection）投递到主线程，
             # 必须边泵事件循环边轮询，否则 done 永远不会被置位
@@ -276,7 +280,7 @@ class TestTaskChainExecute:
         finally:
             executor.shutdown(wait=False)
 
-    def test_chain_execute_failure_breaks_chain(self, qtbot):
+    def test_chain_execute_failure_breaks_chain(self, qtbot: QtBot) -> None:
         """中间步骤抛异常时应触发 on_error，后续步骤不再执行。"""
         _ensure_qapp()
 
@@ -296,9 +300,9 @@ class TestTaskChainExecute:
             return {"step": 3}
 
         done = threading.Event()
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def on_error(results):
+        def on_error(results: dict[str, Any]) -> None:
             captured["results"] = results
             done.set()
 
@@ -311,6 +315,8 @@ class TestTaskChainExecute:
         )
 
         executor = chain.execute()
+
+        assert executor is not None
         try:
             timeout = 10.0
             elapsed = 0.0
@@ -331,13 +337,13 @@ class TestTaskChainExecute:
         finally:
             executor.shutdown(wait=False)
 
-    def test_chain_execute_empty_steps(self):
+    def test_chain_execute_empty_steps(self) -> None:
         """空任务链 execute() 不创建 executor，直接同步回调 on_success。"""
         _ensure_qapp()
 
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def on_success(success, results):
+        def on_success(success: bool, results: dict[str, Any]) -> None:
             captured["success"] = success
             captured["results"] = results
 
@@ -350,7 +356,7 @@ class TestTaskChainExecute:
         assert captured["success"] is True
         assert captured["results"] == {}
 
-    def test_chain_execute_breaks_on_chain_break(self, qtbot):
+    def test_chain_execute_breaks_on_chain_break(self, qtbot: QtBot) -> None:
         """步骤返回 chain_break 时提前成功终止，跳过剩余步骤（回归 C2）"""
         _ensure_qapp()
 
@@ -367,9 +373,9 @@ class TestTaskChainExecute:
             return {"step": 2}
 
         done = threading.Event()
-        captured = {}
+        captured: dict[str, Any] = {}
 
-        def on_success(success, results):
+        def on_success(success: bool, results: dict[str, Any]) -> None:
             captured["success"] = success
             captured["results"] = results
             done.set()
@@ -377,6 +383,8 @@ class TestTaskChainExecute:
         chain = TaskChain().add(step1, "条件检查").add(step2, "不应执行").on_success(on_success)
 
         executor = chain.execute()
+
+        assert executor is not None
         try:
             timeout = 10.0
             elapsed = 0.0
@@ -394,7 +402,7 @@ class TestTaskChainExecute:
         finally:
             executor.shutdown(wait=False)
 
-    def test_chain_shutdown_during_execution_no_crash(self, qtbot):
+    def test_chain_shutdown_during_execution_no_crash(self, qtbot: QtBot) -> None:
         """链执行中 shutdown 后运行中任务完成不再触发提交（回归 C5）"""
         _ensure_qapp()
 
@@ -412,11 +420,12 @@ class TestTaskChainExecute:
 
         done = threading.Event()
 
-        def on_complete(success, results):
+        def on_complete(success: bool, results: dict[str, Any]) -> None:
             done.set()
 
         chain = TaskChain().add(slow_step, "慢步骤").add(follow, "后续步骤").on_success(on_complete)
         executor = chain.execute()
+        assert executor is not None
         assert started.wait(timeout=5)
         # 运行中直接关闭：断开链信号，任务完成信号不得再触发链推进
         executor.shutdown(wait=False)

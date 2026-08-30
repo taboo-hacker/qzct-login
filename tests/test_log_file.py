@@ -7,6 +7,7 @@ D3 测试：日志文件落盘配置
 """
 
 import os
+from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -15,7 +16,7 @@ from loguru import logger
 class TestSetupLoggerFileLogging:
     """setup_logger() 文件日志功能测试：文件创建、内容写入、目录与权限。"""
 
-    def test_log_file_created(self, tmp_path):
+    def test_log_file_created(self, tmp_path: Path) -> None:
         """传入 log_file 后，写一条日志即应触发日志文件创建。"""
         from utils.logger import setup_logger
 
@@ -26,7 +27,7 @@ class TestSetupLoggerFileLogging:
 
         assert os.path.exists(log_file)
 
-    def test_log_message_written_to_file(self, tmp_path):
+    def test_log_message_written_to_file(self, tmp_path: Path) -> None:
         """日志消息应完整写入文件（含唯一标记串）。"""
         from utils.logger import setup_logger
 
@@ -42,7 +43,7 @@ class TestSetupLoggerFileLogging:
             content = f.read()
         assert "unique marker message 12345" in content
 
-    def test_log_file_directory_auto_created(self, tmp_path):
+    def test_log_file_directory_auto_created(self, tmp_path: Path) -> None:
         """日志目录不存在时，配置 log_file 后应自动创建多级目录。"""
         from utils.logger import setup_logger
 
@@ -55,7 +56,7 @@ class TestSetupLoggerFileLogging:
 
         assert log_dir.exists()
 
-    def test_log_file_permissions_restricted_posix(self, tmp_path):
+    def test_log_file_permissions_restricted_posix(self, tmp_path: Path) -> None:
         """POSIX 平台上日志文件权限应为 0o600（仅属主可读写，防敏感信息泄露）。"""
         # Windows 无 POSIX 权限位，跳过该用例
         if os.name != "posix":
@@ -71,7 +72,7 @@ class TestSetupLoggerFileLogging:
         mode = os.stat(log_file).st_mode & 0o777
         assert mode == 0o600
 
-    def test_no_log_file_no_error(self, tmp_path):
+    def test_no_log_file_no_error(self, tmp_path: Path) -> None:
         """不传 log_file（仅控制台输出）时调用不应报错。"""
         from utils.logger import setup_logger
 
@@ -85,7 +86,7 @@ class TestSetupLoggerFileLogging:
 class TestLogFileConstant:
     """LOG_FILE 常量定义测试：验证日志文件路径常量的存在性与位置。"""
 
-    def test_log_file_constant_exists(self):
+    def test_log_file_constant_exists(self) -> None:
         """core.constants 应导出字符串类型的 LOG_FILE 且以 qzct.log 结尾。"""
         from core.constants import LOG_FILE
 
@@ -93,7 +94,7 @@ class TestLogFileConstant:
         assert isinstance(LOG_FILE, str)
         assert LOG_FILE.endswith("qzct.log")
 
-    def test_log_file_in_config_dir(self):
+    def test_log_file_in_config_dir(self) -> None:
         """LOG_FILE 应位于 CONFIG_DIR 目录下（与其他配置文件集中管理）。"""
         from core.constants import CONFIG_DIR, LOG_FILE
 

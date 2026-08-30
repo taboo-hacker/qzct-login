@@ -125,7 +125,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/*" = ["ARG", "S101"]
+"tests/*" = ["ARG", "S101", "B010"]
 
 # ============================================
 # MyPy 类型检查配置
@@ -144,6 +144,8 @@ warn_unused_ignores = true
 warn_no_return = true
 strict_equality = true
 ignore_missing_imports = true
+# 本地优化备份目录（含源码副本）与构建产物不参与类型检查
+exclude = ["backup/", "build/", "dist/", "\\.venv-test/"]
 
 [[tool.mypy.overrides]]
 module = [

@@ -8,6 +8,7 @@ QtLogSink：loguru -> GUI 控件的日志桥接，重点验证跨线程 Signal �
 """
 
 from PySide6.QtWidgets import QApplication, QTextEdit, QWidget
+from pytestqt.qtbot import QtBot
 
 from gui.log_sink import QtLogSink
 
@@ -25,7 +26,7 @@ def _ensure_qapp() -> QApplication:
 class TestTrayManager:
     """TrayManager 测试：托盘可用/不可用两种环境下的创建与交互行为。"""
 
-    def test_tray_unavailable(self, qtbot):
+    def test_tray_unavailable(self, qtbot: QtBot) -> None:
         """系统托盘不可用时不创建图标"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -40,7 +41,7 @@ class TestTrayManager:
             assert tm._tray_icon is None
             assert tm.is_available() is False
 
-    def test_tray_available(self, qtbot):
+    def test_tray_available(self, qtbot: QtBot) -> None:
         """系统托盘可用时应创建托盘图标并报告可用。"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -55,7 +56,7 @@ class TestTrayManager:
             assert tm._tray_icon is not None
             assert tm.is_available() is True
 
-    def test_show_window(self, qtbot):
+    def test_show_window(self, qtbot: QtBot) -> None:
         """show_window 显示并激活父窗口"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -70,7 +71,7 @@ class TestTrayManager:
             tm.show_window()
             assert parent.isVisible()
 
-    def test_notify_when_available(self, qtbot):
+    def test_notify_when_available(self, qtbot: QtBot) -> None:
         """托盘图标可见时 notify 应调用 showMessage 弹出气泡通知。"""
         _ensure_qapp()
         from unittest.mock import MagicMock, patch
@@ -88,7 +89,7 @@ class TestTrayManager:
             tm.notify("Title", "Message")
             tm._tray_icon.showMessage.assert_called_once()
 
-    def test_notify_when_unavailable(self, qtbot):
+    def test_notify_when_unavailable(self, qtbot: QtBot) -> None:
         """托盘图标为 None 时 notify 应静默不崩溃。"""
         _ensure_qapp()
         from gui.tray_manager import TrayManager
@@ -102,7 +103,7 @@ class TestTrayManager:
         tm._tray_icon = None
         tm.notify("Title", "Message")
 
-    def test_on_activated_double_click(self, qtbot):
+    def test_on_activated_double_click(self, qtbot: QtBot) -> None:
         """双击托盘图标应显示并激活父窗口。"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -119,7 +120,7 @@ class TestTrayManager:
             tm._on_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
             assert parent.isVisible()
 
-    def test_on_activated_single_click_noop(self, qtbot):
+    def test_on_activated_single_click_noop(self, qtbot: QtBot) -> None:
         """单击（Trigger）托盘图标不应弹出父窗口。"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -134,7 +135,7 @@ class TestTrayManager:
             tm._on_activated(0)  # Trigger
             assert not parent.isVisible()
 
-    def test_on_quit_calls_real_close(self, qtbot):
+    def test_on_quit_calls_real_close(self, qtbot: QtBot) -> None:
         """托盘菜单退出时应调用 parent.quit_application 完成真正的退出清理。"""
         _ensure_qapp()
         from unittest.mock import MagicMock, patch
@@ -150,7 +151,7 @@ class TestTrayManager:
             tm._on_quit()
             parent.quit_application.assert_called_once()
 
-    def test_on_quit_no_real_close(self, qtbot):
+    def test_on_quit_no_real_close(self, qtbot: QtBot) -> None:
         """parent 未提供 quit_application 时退出也不崩溃。"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -178,7 +179,7 @@ class TestQtLogSink:
         QtLogSink._instance = None
         QtLogSink._pending_logs = []
 
-    def test_set_gui_widget_creates_instance(self, qtbot):
+    def test_set_gui_widget_creates_instance(self, qtbot: QtBot) -> None:
         """首次 set_gui_widget 应创建单例并持有控件引用。"""
         _ensure_qapp()
         widget = QTextEdit()
@@ -187,7 +188,7 @@ class TestQtLogSink:
         assert QtLogSink._instance is not None
         assert QtLogSink._instance.gui_widget is widget
 
-    def test_set_gui_widget_updates_existing(self, qtbot):
+    def test_set_gui_widget_updates_existing(self, qtbot: QtBot) -> None:
         """重复 set_gui_widget 应更新现有单例指向新控件。"""
         _ensure_qapp()
         w1 = QTextEdit()
@@ -196,21 +197,23 @@ class TestQtLogSink:
         qtbot.addWidget(w2)
         QtLogSink.set_gui_widget(w1)
         QtLogSink.set_gui_widget(w2)
+        assert QtLogSink._instance is not None
         assert QtLogSink._instance.gui_widget is w2
 
-    def test_write_with_gui_widget(self, qtbot):
+    def test_write_with_gui_widget(self, qtbot: QtBot) -> None:
         """主线程 write() 后泵事件循环，日志应出现在 GUI 控件中。"""
         _ensure_qapp()
         widget = QTextEdit()
         qtbot.addWidget(widget)
         QtLogSink.set_gui_widget(widget)
+        assert QtLogSink._instance is not None
         sink = QtLogSink._instance
         sink.write("test message\n")
         # 处理事件循环
         QApplication.processEvents()
         assert "test message" in widget.toPlainText()
 
-    def test_write_from_worker_thread_delivers_to_gui(self, qtbot):
+    def test_write_from_worker_thread_delivers_to_gui(self, qtbot: QtBot) -> None:
         """工作线程调用 write() 后日志投递到 GUI（回归：旧 singleShot 实现丢失）"""
         import threading
 
@@ -218,9 +221,10 @@ class TestQtLogSink:
         widget = QTextEdit()
         qtbot.addWidget(widget)
         QtLogSink.set_gui_widget(widget)
+        assert QtLogSink._instance is not None
         sink = QtLogSink._instance
 
-        def worker():
+        def worker() -> None:
             # 模拟 TaskExecutor 工作线程里的 loguru 调用
             sink.write("from worker thread\n")
 
@@ -232,7 +236,7 @@ class TestQtLogSink:
             QApplication.processEvents()
         assert "from worker thread" in widget.toPlainText()
 
-    def test_write_without_gui_widget_buffers(self, qtbot):
+    def test_write_without_gui_widget_buffers(self, qtbot: QtBot) -> None:
         """GUI 控件尚未创建（启动期）时 write() 应把日志暂存到缓冲列表。"""
         _ensure_qapp()
         from PySide6.QtCore import QTimer
@@ -243,7 +247,7 @@ class TestQtLogSink:
         assert any("buffered msg" in log for log in QtLogSink._pending_logs)
         QtLogSink._flush_timer = None  # 清理
 
-    def test_flush_pending_logs(self, qtbot):
+    def test_flush_pending_logs(self, qtbot: QtBot) -> None:
         """_flush_pending_logs 应把缓冲日志写入 GUI 并清空缓冲。"""
         _ensure_qapp()
         widget = QTextEdit()
@@ -256,17 +260,17 @@ class TestQtLogSink:
         assert "msg2" in widget.toPlainText()
         assert len(QtLogSink._pending_logs) == 0
 
-    def test_flush_pending_logs_empty(self):
+    def test_flush_pending_logs_empty(self) -> None:
         """缓冲为空时刷新应为空操作不崩溃。"""
         QtLogSink._flush_pending_logs()
 
-    def test_flush_pending_logs_no_instance(self):
+    def test_flush_pending_logs_no_instance(self) -> None:
         """单例尚未创建时刷新应直接返回不崩溃。"""
         QtLogSink._instance = None
         QtLogSink._pending_logs = ["msg\n"]
         QtLogSink._flush_pending_logs()
 
-    def test_flush_pending_logs_classmethod(self, qtbot):
+    def test_flush_pending_logs_classmethod(self, qtbot: QtBot) -> None:
         """公共方法 flush_pending_logs 应触发 QTimer 定时刷新流程。"""
         _ensure_qapp()
         QtLogSink._pending_logs = ["test\n"]

@@ -7,8 +7,11 @@ MainWindow 构造需要加载配置、初始化日志与托盘，测试中全部
 """
 
 import sys
+from pathlib import Path
 
+import pytest
 from PySide6.QtWidgets import QApplication
+from pytestqt.qtbot import QtBot
 
 
 def _ensure_qapp() -> QApplication:
@@ -19,7 +22,7 @@ def _ensure_qapp() -> QApplication:
 class TestMainWindowSmoke:
     """主窗口冒烟测试：构造流程、配置回显、状态显示三大场景。"""
 
-    def test_constructs_with_layout_widgets(self, qtbot):
+    def test_constructs_with_layout_widgets(self, qtbot: QtBot) -> None:
         """构造主窗口成功后，两栏布局与三个标签页的关键控件应全部存在。"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -62,7 +65,9 @@ class TestMainWindowSmoke:
             if window is not None:
                 window.deleteLater()
 
-    def test_settings_panel_reflects_loaded_config(self, qtbot, tmp_path, monkeypatch):
+    def test_settings_panel_reflects_loaded_config(
+        self, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """设置面板应回显从磁盘加载的配置值（回归：曾因构建顺序颠倒显示默认空值）。"""
         _ensure_qapp()
         import json
@@ -99,6 +104,12 @@ class TestMainWindowSmoke:
                 window._timer.stop()
 
                 panel = window._settings_panel
+                assert (
+                    panel.wifi_name_edit is not None
+                    and panel.username_edit is not None
+                    and panel.shutdown_hour_edit is not None
+                    and panel.shutdown_min_edit is not None
+                )
                 assert panel.wifi_name_edit.text() == "DormWiFi"
                 assert panel.username_edit.text() == "20230101"
                 assert panel.shutdown_hour_edit.text() == "22"
@@ -108,7 +119,7 @@ class TestMainWindowSmoke:
             if window is not None:
                 window.deleteLater()
 
-    def test_status_badge_state_reflects_need_work(self, qtbot):
+    def test_status_badge_state_reflects_need_work(self, qtbot: QtBot) -> None:
         """should_work_today 返回 False/True 时，状态徽标应分别显示休息/工作态。"""
         _ensure_qapp()
         from unittest.mock import patch

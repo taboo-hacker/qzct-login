@@ -17,7 +17,7 @@ def _ensure_qapp() -> QApplication:
 class TestSingleInstance:
     """单实例机制测试：覆盖"首实例监听成功"与"第二实例通知退出"两类场景。"""
 
-    def test_first_instance_listens(self):
+    def test_first_instance_listens(self) -> None:
         """无已有实例时首次监听成功，应返回非 None 的服务器对象。"""
         _ensure_qapp()
         from utils.single_instance import listen_single_instance
@@ -26,7 +26,7 @@ class TestSingleInstance:
         assert server is not None
         server.close()
 
-    def test_second_instance_notifies_and_returns_none(self):
+    def test_second_instance_notifies_and_returns_none(self) -> None:
         """已有实例占用管道时，第二次调用应返回 None 并触发首实例的显示回调。"""
         _ensure_qapp()
         from utils.single_instance import listen_single_instance

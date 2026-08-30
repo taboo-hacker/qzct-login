@@ -12,10 +12,17 @@ CalendarView 万年历视图测试
 判定函数按需 patch 为确定值，避免依赖真实节假日库数据。
 """
 
+from typing import TYPE_CHECKING
+
+import pytest
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QCalendarWidget
+from pytestqt.qtbot import QtBot
 
 from core.config import global_config
+
+if TYPE_CHECKING:
+    from gui.widgets.calendar_view import CalendarView
 
 
 def _ensure_qapp() -> QApplication:
@@ -23,7 +30,7 @@ def _ensure_qapp() -> QApplication:
     return QApplication.instance() or QApplication([])
 
 
-def _make_view(qtbot) -> "object":
+def _make_view(qtbot: QtBot) -> "CalendarView":
     """创建受控配置下的 CalendarView（判定函数由调用方自行 patch）。"""
     from gui.widgets.calendar_view import CalendarView
 
@@ -32,16 +39,18 @@ def _make_view(qtbot) -> "object":
     return view
 
 
-def _has_custom_format(calendar, qdate: QDate) -> bool:
+def _has_custom_format(calendar: QCalendarWidget, qdate: QDate) -> bool:
     """该日期是否被设置过自定义格式（有实底色即视为已标记）。"""
     fmt = calendar.dateTextFormat(qdate)
-    return fmt.background().style() == Qt.BrushStyle.SolidPattern
+    return bool(fmt.background().style() == Qt.BrushStyle.SolidPattern)
 
 
 class TestMarkExecutionDates:
     """mark_execution_dates 测试：标记跟随显示月份、翻页清残留。"""
 
-    def test_marks_shown_month_after_page_flip(self, qtbot, monkeypatch):
+    def test_marks_shown_month_after_page_flip(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """回归：翻页后新显示月份必须有执行标记（selectedDate 停留旧页）。"""
         _ensure_qapp()
         view = _make_view(qtbot)
@@ -63,11 +72,12 @@ class TestMarkExecutionDates:
         view.mark_execution_dates()
         # 新显示月份的月初/月中/月末都应有标记
         for day in (1, 15, 28):
-            assert _has_custom_format(view.calendar, QDate(shown_year, shown_month, day)), (
-                f"{shown_year}-{shown_month}-{day} 翻页后未标记"
-            )
+            marked = _has_custom_format(view.calendar, QDate(shown_year, shown_month, day))
+            assert marked, f"{shown_year}-{shown_month}-{day} 翻页后未标记"
 
-    def test_clears_stale_formats_from_other_months(self, qtbot, monkeypatch):
+    def test_clears_stale_formats_from_other_months(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """重标前清空全部历史格式：其他月份日期不应残留旧标记。"""
         _ensure_qapp()
         view = _make_view(qtbot)
@@ -92,7 +102,9 @@ class TestMarkExecutionDates:
         view.mark_execution_dates()
         assert not _has_custom_format(view.calendar, stale), "其他月份的旧标记未被清除"
 
-    def test_workday_and_restday_get_different_colors(self, qtbot, monkeypatch):
+    def test_workday_and_restday_get_different_colors(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """执行日与休息日应分别使用 success/danger 底色。"""
         _ensure_qapp()
         view = _make_view(qtbot)
@@ -114,7 +126,7 @@ class TestMarkExecutionDates:
 class TestLunarDisplayFormat:
     """LUNAR_DISPLAY_FORMAT 消费测试：简化/完整农历格式切换生效。"""
 
-    def test_simple_format_by_default(self, qtbot):
+    def test_simple_format_by_default(self, qtbot: QtBot) -> None:
         """默认（0）显示简化格式：不含农历年份（如“农历 正月十五”）。"""
         _ensure_qapp()
         global_config["LUNAR_DISPLAY_FORMAT"] = 0
@@ -125,7 +137,7 @@ class TestLunarDisplayFormat:
         assert view.lunar_date_label is not None
         assert "年" not in view.lunar_date_label.text()
 
-    def test_full_format_shows_year(self, qtbot):
+    def test_full_format_shows_year(self, qtbot: QtBot) -> None:
         """完整格式（1）显示农历年份（如“农历二〇二六年…”）。"""
         _ensure_qapp()
         global_config["LUNAR_DISPLAY_FORMAT"] = 1
@@ -136,7 +148,7 @@ class TestLunarDisplayFormat:
         assert view.lunar_date_label is not None
         assert "年" in view.lunar_date_label.text()
 
-    def test_format_switch_without_date_change(self, qtbot):
+    def test_format_switch_without_date_change(self, qtbot: QtBot) -> None:
         """同一日期上切换格式设置后刷新应立即生效（缓存存两种格式）。"""
         _ensure_qapp()
         view = _make_view(qtbot)
@@ -156,7 +168,7 @@ class TestLunarDisplayFormat:
 class TestShouldWorkOnDateStatus:
     """should_work_on_date 状态文案测试：与判定核心优先级一致。"""
 
-    def test_custom_rule_overrides_holiday_status_text(self, qtbot):
+    def test_custom_rule_overrides_holiday_status_text(self, qtbot: QtBot) -> None:
         """自定义规则模式下，文案应反映自定义来源而非内置节假日。"""
         _ensure_qapp()
         global_config.replace_all(
@@ -189,7 +201,7 @@ class TestShouldWorkOnDateStatus:
         _, status2 = view.should_work_on_date(datetime.date(2026, 7, 25))  # 周六
         assert "自定义每周休息日" in status2
 
-    def test_base_mode_holiday_status_text(self, qtbot):
+    def test_base_mode_holiday_status_text(self, qtbot: QtBot) -> None:
         """非自定义模式下文案保持调休/内置节假日来源。"""
         _ensure_qapp()
         global_config.replace_all(

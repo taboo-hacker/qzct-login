@@ -8,7 +8,11 @@ gui/dialogs/* 补充测试
 弹窗提示均已 patch QMessageBox，测试通过 qtbot 管理控件生命周期。
 """
 
+from pathlib import Path
+
+import pytest
 from PySide6.QtWidgets import QApplication
+from pytestqt.qtbot import QtBot
 
 from core.config import global_config
 
@@ -21,7 +25,7 @@ def _ensure_qapp() -> QApplication:
 class TestPeriodEditDialog:
     """PeriodEditDialog 测试：添加/编辑两种构造模式与保存校验逻辑。"""
 
-    def test_constructs_add_mode(self, qtbot):
+    def test_constructs_add_mode(self, qtbot: QtBot) -> None:
         """不传 period 时进入添加模式，标题为"添加时间段"且含名称/起止输入框。"""
         _ensure_qapp()
         from gui.dialogs.period_edit_dialog import PeriodEditDialog
@@ -33,7 +37,7 @@ class TestPeriodEditDialog:
         assert dialog.start_edit is not None
         assert dialog.end_edit is not None
 
-    def test_constructs_edit_mode(self, qtbot):
+    def test_constructs_edit_mode(self, qtbot: QtBot) -> None:
         """传入 period 时进入编辑模式，标题为"编辑时间段"且回显名称。"""
         _ensure_qapp()
         from gui.dialogs.period_edit_dialog import PeriodEditDialog
@@ -41,10 +45,11 @@ class TestPeriodEditDialog:
         period = {"name": "测试", "start": "2026-01-01", "end": "2026-01-07"}
         dialog = PeriodEditDialog(period=period)
         qtbot.addWidget(dialog)
+        assert dialog.name_edit is not None
         assert dialog.windowTitle() == "编辑时间段"
         assert dialog.name_edit.text() == "测试"
 
-    def test_save_empty_name(self, qtbot):
+    def test_save_empty_name(self, qtbot: QtBot) -> None:
         """名称为空时保存应被拒绝，result_period 保持 None。"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -53,12 +58,13 @@ class TestPeriodEditDialog:
 
         dialog = PeriodEditDialog()
         qtbot.addWidget(dialog)
+        assert dialog.name_edit is not None
         dialog.name_edit.setText("")
         with patch("gui.dialogs.period_edit_dialog.QMessageBox.warning"):
             dialog.save()
         assert dialog.result_period is None
 
-    def test_save_success(self, qtbot):
+    def test_save_success(self, qtbot: QtBot) -> None:
         """填写合法名称与起止日期后保存，result_period 应含正确字段值。"""
         _ensure_qapp()
         from PySide6.QtCore import QDate
@@ -67,6 +73,8 @@ class TestPeriodEditDialog:
 
         dialog = PeriodEditDialog()
         qtbot.addWidget(dialog)
+        assert dialog.name_edit is not None and dialog.start_edit is not None
+        assert dialog.end_edit is not None
         dialog.name_edit.setText("测试假期")
         dialog.start_edit.setDate(QDate(2026, 1, 1))
         dialog.end_edit.setDate(QDate(2026, 1, 7))
@@ -75,7 +83,7 @@ class TestPeriodEditDialog:
         assert dialog.result_period["name"] == "测试假期"
         assert dialog.result_period["start"] == "2026-01-01"
 
-    def test_save_invalid_dates(self, qtbot):
+    def test_save_invalid_dates(self, qtbot: QtBot) -> None:
         """开始日期晚于结束日期时保存应被拒绝，result_period 保持 None。"""
         _ensure_qapp()
         from unittest.mock import patch
@@ -86,6 +94,8 @@ class TestPeriodEditDialog:
 
         dialog = PeriodEditDialog()
         qtbot.addWidget(dialog)
+        assert dialog.name_edit is not None and dialog.start_edit is not None
+        assert dialog.end_edit is not None
         dialog.name_edit.setText("测试")
         dialog.start_edit.setDate(QDate(2026, 1, 10))
         dialog.end_edit.setDate(QDate(2026, 1, 5))
@@ -97,7 +107,7 @@ class TestPeriodEditDialog:
 class TestAboutDialog:
     """AboutDialog 测试：构造与版本号复制按钮的文本反馈。"""
 
-    def test_constructs(self, qtbot):
+    def test_constructs(self, qtbot: QtBot) -> None:
         """构造后标题应为"关于我们"且版本按钮存在。"""
         _ensure_qapp()
         from gui.dialogs.about_dialog import AboutDialog
@@ -107,24 +117,26 @@ class TestAboutDialog:
         assert dialog.windowTitle() == "关于我们"
         assert dialog.version_btn is not None
 
-    def test_copy_version(self, qtbot):
+    def test_copy_version(self, qtbot: QtBot) -> None:
         """点击复制版本号后按钮文本应变化以给出操作反馈。"""
         _ensure_qapp()
         from gui.dialogs.about_dialog import AboutDialog
 
         dialog = AboutDialog()
         qtbot.addWidget(dialog)
+        assert dialog.version_btn is not None
         original_text = dialog.version_btn.text()
         dialog._copy_version()
         assert dialog.version_btn.text() != original_text
 
-    def test_restore_version_button(self, qtbot):
+    def test_restore_version_button(self, qtbot: QtBot) -> None:
         """_restore_version_button 应把按钮文本恢复为"版本 + 版本号"（定时器回调用）。"""
         _ensure_qapp()
         from gui.dialogs.about_dialog import AboutDialog
 
         dialog = AboutDialog()
         qtbot.addWidget(dialog)
+        assert dialog.version_btn is not None
         dialog.version_btn.setText("✓ 已复制")
         dialog._restore_version_button()
         assert dialog.version_btn.text() == f"版本 {dialog.version}"
@@ -133,7 +145,7 @@ class TestAboutDialog:
 class TestSettingsDialog:
     """SettingsDialog 测试：构造布局、主题选择切换与密码框可见性。"""
 
-    def test_constructs(self, qtbot):
+    def test_constructs(self, qtbot: QtBot) -> None:
         """默认配置下构造成功，应含 7 个设置子页的 tab_widget。"""
         _ensure_qapp()
         from core.config import DEFAULT_CONFIG
@@ -150,7 +162,7 @@ class TestSettingsDialog:
         assert dialog.tab_widget is not None
         assert dialog.tab_widget.count() == 7
 
-    def test_tab_pages_are_scrollable(self, qtbot):
+    def test_tab_pages_are_scrollable(self, qtbot: QtBot) -> None:
         """每个设置子页包在滚动区域内（窗口小时可上下滚动，回归修复）。"""
         _ensure_qapp()
         from core.config import DEFAULT_CONFIG
@@ -164,11 +176,14 @@ class TestSettingsDialog:
 
         dialog = SettingsDialog()
         qtbot.addWidget(dialog)
+        assert dialog.tab_widget is not None
         for i in range(dialog.tab_widget.count()):
             page = dialog.tab_widget.widget(i)
             assert isinstance(page, QScrollArea), f"第 {i} 个设置子页不是滚动区域"
 
-    def test_save_config_disk_failure_rolls_back(self, qtbot, monkeypatch):
+    def test_save_config_disk_failure_rolls_back(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """回归（事务性）：落盘失败时内存配置应回滚，不得出现半程写入。
 
         旧实现三个子组件 save 方法在校验阶段就直接写 global_config，
@@ -190,13 +205,16 @@ class TestSettingsDialog:
 
         panel = SettingsPanel()
         qtbot.addWidget(panel)
+        assert panel.wifi_name_edit is not None
         panel.wifi_name_edit.setText("NewWiFi")
         panel.save_config()
 
         # 落盘失败：内存配置应保持原样
         assert global_config.get("WIFI_NAME") == DEFAULT_CONFIG["WIFI_NAME"]
 
-    def test_save_config_success_persists(self, qtbot, tmp_path, monkeypatch):
+    def test_save_config_success_persists(
+        self, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """正常保存：所有字段写入 global_config 并落盘，发出 config_saved 信号。"""
         _ensure_qapp()
         import json
@@ -217,6 +235,7 @@ class TestSettingsDialog:
         saved_signals: list[bool] = []
         panel.config_saved.connect(lambda: saved_signals.append(True))
 
+        assert panel.wifi_name_edit is not None
         panel.wifi_name_edit.setText("NewWiFi")
         panel.save_config()
 
@@ -228,7 +247,7 @@ class TestSettingsDialog:
         )
         assert saved_signals == [True]
 
-    def test_theme_selector(self, qtbot):
+    def test_theme_selector(self, qtbot: QtBot) -> None:
         """主题下拉框应存在且至少提供亮/暗两个选项。"""
         _ensure_qapp()
         from core.config import DEFAULT_CONFIG
@@ -243,7 +262,7 @@ class TestSettingsDialog:
         assert dialog.theme_combo is not None
         assert dialog.theme_combo.count() >= 2
 
-    def test_get_theme_display_name(self, qtbot):
+    def test_get_theme_display_name(self, qtbot: QtBot) -> None:
         """主题 key 应映射为中文名（light=亮色、dark=暗色），未知 key 原样返回。"""
         _ensure_qapp()
         from core.config import DEFAULT_CONFIG
@@ -259,7 +278,7 @@ class TestSettingsDialog:
         assert "暗色" in dialog._get_theme_display_name("dark")
         assert dialog._get_theme_display_name("unknown") == "unknown"
 
-    def test_toggle_password_visibility(self, qtbot):
+    def test_toggle_password_visibility(self, qtbot: QtBot) -> None:
         """切换密码可见性：按钮选中显示明文/文案"隐藏"，取消则恢复密文/"显示"。"""
         _ensure_qapp()
         from core.config import DEFAULT_CONFIG
@@ -286,7 +305,9 @@ class TestSettingsDialog:
         assert edit.echoMode() == QLineEdit.EchoMode.Password
         assert btn.text() == "显示"
 
-    def test_on_theme_changed(self, qtbot, tmp_path, monkeypatch):
+    def test_on_theme_changed(
+        self, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """选择 dark 主题项后 THEME 应同步更新并即时落盘到配置文件。"""
         _ensure_qapp()
         import core.config as cfg_module
@@ -303,6 +324,7 @@ class TestSettingsDialog:
 
         dialog = SettingsDialog()
         qtbot.addWidget(dialog)
+        assert dialog.theme_combo is not None
         # 切换到 dark 主题
         dark_index = dialog.theme_combo.findData("dark")
         if dark_index >= 0:

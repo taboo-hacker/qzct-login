@@ -97,8 +97,8 @@ class ThemeManager:
     @classmethod
     def apply_to_widget(
         cls,
-        widget: QWidget,
-        theme_name: str | None = None,  # noqa: ARG003
+        widget: QWidget,  # noqa: ARG003  # 兼容旧调用方保留，见 docstring
+        theme_name: str | None = None,
     ) -> None:
         """应用主题：指定名称则切换主题，否则按当前主题重刷全局 QSS。
 

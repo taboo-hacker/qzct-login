@@ -11,6 +11,7 @@ Pytest 全局配置文件
 
 import os
 import sys
+from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -47,7 +48,7 @@ def sample_config() -> dict:
 
 
 @pytest.fixture(autouse=True)
-def reset_global_config():
+def reset_global_config() -> Iterator[None]:
     """autouse（function 作用域）：每个测试前快照、测试后还原全局配置单例，防止状态泄漏。"""
     from core.config import global_config
 
@@ -58,7 +59,7 @@ def reset_global_config():
 
 
 @pytest.fixture
-def mock_subprocess():
+def mock_subprocess() -> Iterator[MagicMock]:
     """Mock subprocess.run（function 作用域），供 wifi/shutdown 等服务测试隔离系统命令调用。"""
     with patch("subprocess.run") as mock_run:
         # 默认返回执行成功且输出为空，测试可按需覆盖 returncode/stdout
@@ -67,7 +68,7 @@ def mock_subprocess():
 
 
 @pytest.fixture
-def mock_requests():
+def mock_requests() -> Iterator[MagicMock]:
     """Mock requests.Session（function 作用域），供 campus_login 测试隔离 JSONP 网络请求。"""
     with patch("requests.Session") as mock_session:
         mock_instance = MagicMock()

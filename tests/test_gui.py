@@ -6,8 +6,11 @@ GUI 模块测试
 （从 test_infra.py 迁入，因 TaskExecutor 依赖 PySide6 信号机制）。
 """
 
+from typing import Any
+
 import pytest
 from PySide6.QtWidgets import QApplication
+from pytestqt.qtbot import QtBot
 
 from gui.styling.themes import BUILTIN_THEMES, ThemeColors, create_dark_theme, create_light_theme
 
@@ -20,7 +23,7 @@ def _ensure_qapp() -> QApplication:
 class TestThemeColors:
     """主题配色数据类测试：浅色/深色主题的字段完整性与差异校验。"""
 
-    def test_light_theme_has_all_fields(self):
+    def test_light_theme_has_all_fields(self) -> None:
         """浅色主题应包含日志配色、语义配色、语义背景色与文本色等全部字段。"""
         theme = create_light_theme()
         assert theme.name == "light"
@@ -46,7 +49,7 @@ class TestThemeColors:
         assert theme.text_secondary
         assert theme.text_tertiary
 
-    def test_dark_theme_has_all_fields(self):
+    def test_dark_theme_has_all_fields(self) -> None:
         """深色主题应包含与浅色主题同套的完整字段。"""
         theme = create_dark_theme()
         assert theme.name == "dark"
@@ -68,7 +71,7 @@ class TestThemeColors:
         assert theme.text_secondary
         assert theme.text_tertiary
 
-    def test_themes_are_different(self):
+    def test_themes_are_different(self) -> None:
         """浅色和深色主题的关键颜色值应确实不同。"""
         light = create_light_theme()
         dark = create_dark_theme()
@@ -76,7 +79,7 @@ class TestThemeColors:
         assert light.primary != dark.primary
         assert light.text_primary != dark.text_primary
 
-    def test_builtin_themes_contains_both(self):
+    def test_builtin_themes_contains_both(self) -> None:
         """内置主题字典 BUILTIN_THEMES 应同时包含 light 与 dark 两套 ThemeColors。"""
         assert "light" in BUILTIN_THEMES
         assert "dark" in BUILTIN_THEMES
@@ -84,7 +87,7 @@ class TestThemeColors:
         assert isinstance(BUILTIN_THEMES["dark"], ThemeColors)
 
     @pytest.mark.parametrize("bg_field", ["primary_bg", "success_bg", "warning_bg", "danger_bg"])
-    def test_bg_fields_are_valid_hex_colors(self, bg_field):
+    def test_bg_fields_are_valid_hex_colors(self, bg_field: str) -> None:
         """所有内置主题的背景色字段应为 #RRGGBB 七位十六进制颜色值。"""
         for theme_name, theme in BUILTIN_THEMES.items():
             color = getattr(theme, bg_field)
@@ -95,14 +98,14 @@ class TestThemeColors:
 class TestThemeManager:
     """主题管理器测试：ThemeManager 的可用性与主题取值。"""
 
-    def test_theme_manager_default(self):
+    def test_theme_manager_default(self) -> None:
         """ThemeManager 类可正常导入（模块加载时已初始化单例）。"""
         from gui.styling.theme_manager import ThemeManager
 
         # ThemeManager 可能在模块加载时已初始化
         assert ThemeManager is not None
 
-    def test_get_colors_returns_theme_colors(self):
+    def test_get_colors_returns_theme_colors(self) -> None:
         """current_theme() 应返回 ThemeColors 实例且含 calendar_dialog 依赖的字段。"""
         from gui.styling.theme_manager import ThemeManager
 
@@ -118,7 +121,7 @@ class TestThemeManager:
 class TestCalendarDialog:
     """日历对话框测试——验证阶段一修复的 ThemeColors 缺失字段不再崩溃"""
 
-    def test_calendar_dialog_constructs_without_crash(self, qtbot):
+    def test_calendar_dialog_constructs_without_crash(self, qtbot: QtBot) -> None:
         """CalendarDialog 能正常构造并设置窗口标题，不因缺失主题字段而崩溃。"""
         from gui.dialogs.calendar_dialog import CalendarDialog
 
@@ -126,7 +129,7 @@ class TestCalendarDialog:
         qtbot.addWidget(dialog)
         assert dialog.windowTitle() == "万年历 - 任务执行计划"
 
-    def test_calendar_dialog_has_calendar_widget(self, qtbot):
+    def test_calendar_dialog_has_calendar_widget(self, qtbot: QtBot) -> None:
         """日历对话框应包含 QCalendarWidget 日历控件。"""
         from gui.dialogs.calendar_dialog import CalendarDialog
 
@@ -134,7 +137,7 @@ class TestCalendarDialog:
         qtbot.addWidget(dialog)
         assert dialog.calendar is not None
 
-    def test_calendar_dialog_has_labels(self, qtbot):
+    def test_calendar_dialog_has_labels(self, qtbot: QtBot) -> None:
         """日历对话框应包含公历/农历/工作状态标签。"""
         from gui.dialogs.calendar_dialog import CalendarDialog
 
@@ -144,7 +147,7 @@ class TestCalendarDialog:
         assert dialog.lunar_date_label is not None
         assert dialog.work_status_label is not None
 
-    def test_calendar_dialog_format_date_cell(self, qtbot):
+    def test_calendar_dialog_format_date_cell(self, qtbot: QtBot) -> None:
         """构造后农历缓存 _lunar_cache 应被正确初始化为 dict。"""
         from gui.dialogs.calendar_dialog import CalendarDialog
 
@@ -157,7 +160,7 @@ class TestCalendarDialog:
 class TestTaskExecutorActiveCount:
     """TaskExecutor.active_count 属性测试（替代原 ThreadPoolManager）"""
 
-    def test_active_count_initial_zero(self, qtbot):
+    def test_active_count_initial_zero(self, qtbot: QtBot) -> None:
         """新建 executor 未提交任务时 active_count 应为 0。"""
         from infra.concurrency import TaskExecutor
 
@@ -168,7 +171,7 @@ class TestTaskExecutorActiveCount:
         finally:
             executor.shutdown(wait=False)
 
-    def test_active_count_after_submit(self, qtbot):
+    def test_active_count_after_submit(self, qtbot: QtBot) -> None:
         """提交长任务（sleep 10s）后 active_count 应至少为 1。"""
         import time
 
@@ -178,7 +181,7 @@ class TestTaskExecutorActiveCount:
         executor = TaskExecutor()
 
         @task("长任务")
-        def long_task(ctx: TaskContext):
+        def long_task(ctx: TaskContext) -> dict[str, Any]:
             time.sleep(10)
             return {}
 
@@ -191,7 +194,7 @@ class TestTaskExecutorActiveCount:
             executor.cancel_all()
             executor.shutdown(wait=False)
 
-    def test_max_workers_reasonable(self, qtbot):
+    def test_max_workers_reasonable(self, qtbot: QtBot) -> None:
         """max_workers 应落在 [1, min(cpu_count*4, 16)] 的合理范围内。"""
         import os
 
