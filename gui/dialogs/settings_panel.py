@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.config import DEFAULT_CONFIG, global_config, save_config
+from core.config import DEFAULT_CONFIG, global_config
+from core.config import save_config as save_config_to_disk
 from gui.styling.constants import FontSize
 from gui.styling.theme_manager import ThemeManager
 from gui.styling.widgets import (
@@ -149,17 +150,10 @@ class SettingsPanel(QWidget):
         if theme_name:
             ThemeManager.set_theme(theme_name)
             global_config["THEME"] = theme_name
-            self._update_child_themes()
+            # 主题即时生效也即时落盘：否则用户切完主题直接退出，
+            # 下次启动会回退到旧主题（"即时生效"的预期含持久化）
+            save_config_to_disk()
             self.theme_changed.emit(theme_name)
-
-    def _update_child_themes(self) -> None:
-        """更新子组件主题"""
-        if self.date_rule_widget:
-            self.date_rule_widget.update_theme()
-        if self.compensatory_widget:
-            self.compensatory_widget.update_theme()
-        if self.base_holiday_widget:
-            self.base_holiday_widget.update_theme()
 
     def _create_form_tab(self) -> tuple[QWidget, QFormLayout]:
         """创建统一规格的表单标签页（紧凑间距）。"""
@@ -426,28 +420,29 @@ class SettingsPanel(QWidget):
             QMessageBox.warning(self, "提示", "关机分钟请输入 0~59 之间的整数")
             return
 
-        # 日期规则
+        # 日期规则 / 调休上班日 / 基础节假日：子组件只返回待保存数据，
+        # 与表单字段一样先进 pending，验证通过后统一写入（保存事务性）
         if self.date_rule_widget:
-            self.date_rule_widget.save_rules()
-            pending["DATE_RULES"] = self.date_rule_widget.date_rules
+            pending["DATE_RULES"] = self.date_rule_widget.save_rules()
 
-        # 调休上班日
         if self.compensatory_widget:
-            self.compensatory_widget.save_days()
+            pending["COMPENSATORY_WORKDAYS"] = self.compensatory_widget.save_days()
 
-        # 基础节假日
         if self.base_holiday_widget:
-            self.base_holiday_widget.save_holidays()
+            pending["HOLIDAY_PERIODS"] = self.base_holiday_widget.save_holidays()
 
         # 应用程序设置
         pending["SHOW_LUNAR_CALENDAR"] = self.show_lunar_check.isChecked()
         pending["LUNAR_DISPLAY_FORMAT"] = self.lunar_format_combo.currentIndex()
 
-        # 所有验证通过，统一写入 global_config
+        # 所有验证通过，统一写入 global_config；先备份内存配置，
+        # 落盘失败时回滚——保证内存与文件始终一致（事务性）
+        previous_config = global_config.snapshot()
         for key, value in pending.items():
             global_config[key] = value
 
-        if not save_config():
+        if not save_config_to_disk():
+            global_config.replace_all(previous_config)
             QMessageBox.critical(self, "错误", "保存配置失败，请检查文件权限或查看日志")
             return
 

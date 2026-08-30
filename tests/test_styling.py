@@ -174,12 +174,11 @@ class TestLogTextEdit:
         edit.append_colored("unknown", "UNKNOWN")
         assert "unknown" in edit.toPlainText()
 
-    def test_update_theme_no_crash(self, qtbot):
-        """update_theme 刷新主题配色应正常执行不崩溃。"""
+    def test_no_theme_hook_remains(self):
+        """LogTextEdit 的主题空钩子（update_theme/_update_colors）应已移除。"""
         _ensure_qapp()
-        edit = LogTextEdit()
-        qtbot.addWidget(edit)
-        edit.update_theme()
+        assert not hasattr(LogTextEdit, "update_theme")
+        assert not hasattr(LogTextEdit, "_update_colors")
 
 
 class TestThemeManagerExtended:

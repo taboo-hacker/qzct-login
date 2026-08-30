@@ -155,6 +155,10 @@ class BaseHolidayWidget(BaseListEditorWidget):
     def _get_clear_confirm_text(self) -> str:
         return "确定要清空所有节假日吗？"
 
-    def save_holidays(self) -> None:
-        """保存节假日到配置（由 SettingsPanel.save_config 统一调用）。"""
-        global_config["HOLIDAY_PERIODS"] = self.holiday_periods
+    def save_holidays(self) -> list[dict[str, Any]]:
+        """返回待保存的节假日区间列表。
+
+        不直接写 global_config：由 SettingsPanel.save_config 收集进 pending，
+        全部验证通过后统一写入并落盘，保证保存的事务性。
+        """
+        return self.holiday_periods

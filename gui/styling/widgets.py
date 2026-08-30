@@ -121,14 +121,6 @@ class LogTextEdit(QTextEdit):
         # 常驻托盘应用日志昼夜累积：限制文档块数，Qt 自动删除最旧日志行，
         # 防止内存持续增长与追加/重绘变慢（文件日志不受影响）
         self.document().setMaximumBlockCount(2000)
-        self._update_colors()
-
-    def _update_colors(self) -> None:
-        """配色由全局 QSS 管理，无需组件内处理"""
-        pass
-
-    def update_theme(self) -> None:
-        self._update_colors()
 
     def append_colored(self, text: str, level: str = "INFO") -> None:
         """按日志级别着色追加一行（颜色取自当前主题的 log_* 配色）。

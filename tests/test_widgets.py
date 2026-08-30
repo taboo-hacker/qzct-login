@@ -211,12 +211,12 @@ class TestBaseListEditorWidget:
         qtbot.addWidget(widget)
         assert "确定" in widget._get_clear_confirm_text()
 
-    def test_update_theme_no_crash(self, qtbot):
-        """update_theme 刷新控件主题应正常执行不崩溃。"""
+    def test_no_update_theme_hook(self):
+        """主题刷新钩子已随空调用链移除，基类不应再提供 update_theme。"""
         _ensure_qapp()
-        widget = self._make_concrete_editor()
-        qtbot.addWidget(widget)
-        widget.update_theme()
+        from gui.widgets.base_list_editor import BaseListEditorWidget
+
+        assert not hasattr(BaseListEditorWidget, "update_theme")
 
 
 class TestBaseHolidayWidget:
@@ -311,7 +311,7 @@ class TestBaseHolidayWidget:
         assert sorted_items[0]["name"] == "A"
 
     def test_save_holidays(self, qtbot):
-        """save_holidays 应把控件中的假期列表写回 global_config。"""
+        """save_holidays 应返回假期列表，且不直接写 global_config（事务性）。"""
         _ensure_qapp()
         from gui.widgets.holiday_widget import BaseHolidayWidget
 
@@ -321,8 +321,10 @@ class TestBaseHolidayWidget:
         widget = BaseHolidayWidget()
         qtbot.addWidget(widget)
         widget.holiday_periods = [{"name": "测试", "start": "2026-01-01", "end": "2026-01-03"}]
-        widget.save_holidays()
-        assert global_config["HOLIDAY_PERIODS"] == widget.holiday_periods
+        result = widget.save_holidays()
+        assert result == widget.holiday_periods
+        # 子组件不直接写配置，由 SettingsPanel 统一写入
+        assert global_config["HOLIDAY_PERIODS"] == []
 
     def test_row_to_cells(self, qtbot):
         """一条假期记录应转换为名称/开始/结束三个单元格。"""
@@ -384,7 +386,7 @@ class TestCompensatoryWorkdayWidget:
         assert sorted_items[0]["date"] == "2026-01-01"
 
     def test_save_days(self, qtbot):
-        """save_days 应把补班日列表压缩为日期字符串列表写回配置。"""
+        """save_days 应返回压缩后的日期字符串列表，且不直接写 global_config（事务性）。"""
         _ensure_qapp()
         from gui.widgets.compensatory_widget import CompensatoryWorkdayWidget
 
@@ -397,8 +399,64 @@ class TestCompensatoryWorkdayWidget:
             {"name": "2026-01-04", "date": "2026-01-04"},
             {"name": "2026-01-05", "date": "2026-01-05"},
         ]
-        widget.save_days()
-        assert global_config["COMPENSATORY_WORKDAYS"] == ["2026-01-04", "2026-01-05"]
+        result = widget.save_days()
+        assert result == ["2026-01-04", "2026-01-05"]
+        # 子组件不直接写配置，由 SettingsPanel 统一写入
+        assert global_config["COMPENSATORY_WORKDAYS"] == []
+
+    def test_add_date_dialog_sets_selected_date_on_accept(self, qtbot):
+        """回归：点"确定"（accept）后 selected_date 必须采集到所选日期。
+
+        旧实现 selected_date 永远是 None，导致调休日"添加/编辑"静默失效。
+        """
+        _ensure_qapp()
+        from PySide6.QtCore import QDate
+
+        from gui.widgets.compensatory_widget import AddDateDialog
+
+        dialog = AddDateDialog()
+        qtbot.addWidget(dialog)
+        assert dialog.selected_date is None  # 初始未确认
+        dialog.date_edit.setDate(QDate(2026, 10, 1))
+        dialog.accept()
+        assert dialog.selected_date == QDate(2026, 10, 1)
+
+    def test_add_date_dialog_reject_keeps_none(self, qtbot):
+        """取消（reject）时 selected_date 应保持 None，调用方据此跳过写入。"""
+        _ensure_qapp()
+        from gui.widgets.compensatory_widget import AddDateDialog
+
+        dialog = AddDateDialog()
+        qtbot.addWidget(dialog)
+        dialog.reject()
+        assert dialog.selected_date is None
+
+    def test_add_item_appends_confirmed_date(self, qtbot, monkeypatch):
+        """端到端回归：弹窗确认日期后 _add_item 应真正追加进列表。"""
+        _ensure_qapp()
+        from PySide6.QtCore import QDate
+
+        from gui.widgets import compensatory_widget as cw_mod
+        from gui.widgets.compensatory_widget import CompensatoryWorkdayWidget
+
+        global_config.clear()
+        global_config.update({"COMPENSATORY_WORKDAYS": []})
+
+        widget = CompensatoryWorkdayWidget()
+        qtbot.addWidget(widget)
+
+        class FakeDialog:
+            """替身：模拟用户选了 2026-10-01 并点确定。"""
+
+            def __init__(self, parent=None, current_date: str = "") -> None:
+                self.selected_date = QDate(2026, 10, 1)
+
+            def exec(self) -> int:
+                return 1  # QDialog.Accepted
+
+        monkeypatch.setattr(cw_mod, "AddDateDialog", FakeDialog)
+        widget.add_item()
+        assert widget.compensatory_days == [{"name": "2026-10-01", "date": "2026-10-01"}]
 
 
 class TestDateRuleWidget:
@@ -494,7 +552,7 @@ class TestDateRuleWidget:
         assert cells[3].text() == "假期"
 
     def test_save_rules(self, qtbot):
-        """勾选启用开关后 save_rules 应把 ENABLE_CUSTOM_RULE 置 True。"""
+        """勾选启用开关后 save_rules 返回的规则中 ENABLE_CUSTOM_RULE 应为 True。"""
         _ensure_qapp()
         from gui.widgets.date_rule_widget import DateRuleWidget
 
@@ -504,11 +562,11 @@ class TestDateRuleWidget:
         widget = DateRuleWidget()
         qtbot.addWidget(widget)
         widget.enable_checkbox.setChecked(True)
-        widget.save_rules()
-        assert global_config["DATE_RULES"]["ENABLE_CUSTOM_RULE"] is True
+        rules = widget.save_rules()
+        assert rules["ENABLE_CUSTOM_RULE"] is True
 
     def test_save_rules_weekly_days(self, qtbot):
-        """勾选周一/周三后 save_rules 应把 0 和 2 写入 WEEKLY_EXECUTE_DAYS。"""
+        """勾选周一/周三后 save_rules 返回的 WEEKLY_EXECUTE_DAYS 应含 0 和 2。"""
         _ensure_qapp()
         from gui.widgets.date_rule_widget import DateRuleWidget
 
@@ -520,6 +578,6 @@ class TestDateRuleWidget:
         # 勾选周一和周三（checkbox 索引对应 weekday 编号 0/2）
         widget.weekday_checkboxes[0].setChecked(True)
         widget.weekday_checkboxes[2].setChecked(True)
-        widget.save_rules()
-        assert 0 in global_config["DATE_RULES"]["WEEKLY_EXECUTE_DAYS"]
-        assert 2 in global_config["DATE_RULES"]["WEEKLY_EXECUTE_DAYS"]
+        rules = widget.save_rules()
+        assert 0 in rules["WEEKLY_EXECUTE_DAYS"]
+        assert 2 in rules["WEEKLY_EXECUTE_DAYS"]

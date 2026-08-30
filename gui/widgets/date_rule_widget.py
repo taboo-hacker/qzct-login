@@ -176,8 +176,12 @@ class DateRuleWidget(BaseListEditorWidget):
     def _get_clear_confirm_text(self) -> str:
         return "确定要清空所有自定义日期规则吗？"
 
-    def save_rules(self) -> None:
-        """保存规则到配置：收集开关与每周执行日，剥离 _type 临时标记后写回。"""
+    def save_rules(self) -> dict[str, Any]:
+        """收集开关与每周执行日到 date_rules 并返回（剥离 _type 临时标记）。
+
+        不直接写 global_config：由 SettingsPanel.save_config 收集进 pending，
+        全部验证通过后统一写入并落盘，保证保存的事务性。
+        """
         assert self.enable_checkbox is not None
         self.date_rules["ENABLE_CUSTOM_RULE"] = self.enable_checkbox.isChecked()
         weekday_days = [
@@ -188,4 +192,4 @@ class DateRuleWidget(BaseListEditorWidget):
             rule.pop("_type", None)
         for rule in self.date_rules.get("CUSTOM_HOLIDAY_PERIODS", []):
             rule.pop("_type", None)
-        global_config["DATE_RULES"] = self.date_rules
+        return self.date_rules

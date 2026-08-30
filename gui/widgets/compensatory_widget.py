@@ -87,21 +87,34 @@ class CompensatoryWorkdayWidget(BaseListEditorWidget):
     def _get_clear_confirm_text(self) -> str:
         return "确定要清空所有调休上班日吗？"
 
-    def save_days(self) -> None:
-        """保存调休上班日到配置（还原为纯日期字符串列表）。"""
-        global_config["COMPENSATORY_WORKDAYS"] = [d["date"] for d in self.compensatory_days]
+    def save_days(self) -> list[str]:
+        """返回待保存的调休上班日（压缩为纯日期字符串列表）。
+
+        不直接写 global_config：由 SettingsPanel.save_config 收集进 pending，
+        全部验证通过后统一写入并落盘，保证保存的事务性。
+        """
+        return [d["date"] for d in self.compensatory_days]
 
 
 class AddDateDialog(QDialog):
-    """日期选择对话框（QDateEdit + 日历弹出面板，确定/取消）。"""
+    """日期选择对话框（QDateEdit + 日历弹出面板，确定/取消）。
+
+    调用方约定：``dialog.exec()`` 为真且 ``dialog.selected_date`` 非 None
+    表示用户确认了选择（见 _add_item/_edit_item）；selected_date 只在
+    accept() 时采集，取消（reject/关闭）保持 None。
+    """
 
     def __init__(self, parent: QWidget | None = None, current_date: str = "") -> None:
         super().__init__(parent)
-        # 用户确认选择后非 None；取消则为 None（调用方以是否 exec+非空判断）
         self.selected_date: QDate | None = None
         self.setWindowTitle("选择日期")
         self.setMinimumWidth(300)
         self._init_ui(current_date)
+
+    def accept(self) -> None:
+        """确认：采集日期控件的当前值到 selected_date，再走默认接受流程。"""
+        self.selected_date = self.date_edit.date()
+        super().accept()
 
     def _init_ui(self, current_date: str) -> None:
         """构建界面；current_date 非空时作为初始选中值（编辑场景）。"""

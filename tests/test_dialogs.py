@@ -168,6 +168,65 @@ class TestSettingsDialog:
             page = dialog.tab_widget.widget(i)
             assert isinstance(page, QScrollArea), f"第 {i} 个设置子页不是滚动区域"
 
+    def test_save_config_disk_failure_rolls_back(self, qtbot, monkeypatch):
+        """回归（事务性）：落盘失败时内存配置应回滚，不得出现半程写入。
+
+        旧实现三个子组件 save 方法在校验阶段就直接写 global_config，
+        落盘失败后内存与文件不一致，重启后设置"丢失"。
+        """
+        _ensure_qapp()
+        import gui.dialogs.settings_panel as sp_mod
+        from core.config import DEFAULT_CONFIG
+
+        from PySide6.QtWidgets import QMessageBox
+
+        monkeypatch.setattr(sp_mod, "save_config_to_disk", lambda: False)
+        monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+
+        global_config.clear()
+        global_config.update(DEFAULT_CONFIG)
+
+        from gui.dialogs.settings_panel import SettingsPanel
+
+        panel = SettingsPanel()
+        qtbot.addWidget(panel)
+        panel.wifi_name_edit.setText("NewWiFi")
+        panel.save_config()
+
+        # 落盘失败：内存配置应保持原样
+        assert global_config.get("WIFI_NAME") == DEFAULT_CONFIG["WIFI_NAME"]
+
+    def test_save_config_success_persists(self, qtbot, tmp_path, monkeypatch):
+        """正常保存：所有字段写入 global_config 并落盘，发出 config_saved 信号。"""
+        _ensure_qapp()
+        import json
+
+        import core.config as cfg_module
+        from core.config import DEFAULT_CONFIG
+
+        monkeypatch.setattr(cfg_module, "CONFIG_DIR", str(tmp_path))
+        monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(tmp_path / "config.json"))
+
+        global_config.clear()
+        global_config.update(DEFAULT_CONFIG)
+
+        from gui.dialogs.settings_panel import SettingsPanel
+
+        panel = SettingsPanel()
+        qtbot.addWidget(panel)
+        saved_signals: list[bool] = []
+        panel.config_saved.connect(lambda: saved_signals.append(True))
+
+        panel.wifi_name_edit.setText("NewWiFi")
+        panel.save_config()
+
+        assert global_config.get("WIFI_NAME") == "NewWiFi"
+        assert (tmp_path / "config.json").exists()
+        assert json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))[
+            "WIFI_NAME"
+        ] == "NewWiFi"
+        assert saved_signals == [True]
+
     def test_theme_selector(self, qtbot):
         """主题下拉框应存在且至少提供亮/暗两个选项。"""
         _ensure_qapp()
@@ -226,10 +285,15 @@ class TestSettingsDialog:
         assert edit.echoMode() == QLineEdit.EchoMode.Password
         assert btn.text() == "显示"
 
-    def test_on_theme_changed(self, qtbot):
-        """选择 dark 主题项后 global_config["THEME"] 应同步更新为 dark。"""
+    def test_on_theme_changed(self, qtbot, tmp_path, monkeypatch):
+        """选择 dark 主题项后 THEME 应同步更新并即时落盘到配置文件。"""
         _ensure_qapp()
+        import core.config as cfg_module
         from core.config import DEFAULT_CONFIG
+
+        # 重定向配置文件到临时目录，避免测试写坏真实 ~/.qzct/config.json
+        monkeypatch.setattr(cfg_module, "CONFIG_DIR", str(tmp_path))
+        monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(tmp_path / "config.json"))
 
         global_config.clear()
         global_config.update(DEFAULT_CONFIG)
@@ -243,3 +307,8 @@ class TestSettingsDialog:
         if dark_index >= 0:
             dialog._on_theme_changed(dark_index)
             assert global_config.get("THEME") == "dark"
+            # 主题切换应即时持久化（切完直接退出也不回退）
+            import json
+
+            saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+            assert saved["THEME"] == "dark"

@@ -228,7 +228,3 @@ class BaseListEditorWidget(QWidget):
     def _get_clear_confirm_text(self) -> str:
         """清空按钮的确认文案。"""
         return "确定要清空所有数据吗？"
-
-    def update_theme(self) -> None:
-        """更新主题样式 — 子类可覆盖。"""
-        pass
