@@ -8,6 +8,7 @@
 基于 BaseListEditorWidget 骨架；判定逻辑见 core/date_rules.py。
 """
 
+import copy
 from typing import Any
 
 from PySide6.QtWidgets import (
@@ -30,7 +31,10 @@ class DateRuleWidget(BaseListEditorWidget):
     """自定义日期规则编辑组件（开关 + 每周执行日 + 区间规则表）。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        self.date_rules: dict[str, Any] = dict(global_config.get("DATE_RULES", {}))
+        # 深拷贝配置数据：面板上的编辑是"草稿"，点保存才写回 global_config
+        # （ConfigManager.get 只做浅拷贝，嵌套 list 仍与 global_config 共享引用，
+        #   直接 dict(...) 会让未保存的追加规则改写内存中的生效配置）
+        self.date_rules: dict[str, Any] = copy.deepcopy(global_config.get("DATE_RULES", {}))
 
         # 兜底补齐子字段，避免旧配置缺键导致 KeyError
         for key in ("CUSTOM_HOLIDAY_PERIODS", "CUSTOM_WORKDAY_PERIODS", "WEEKLY_EXECUTE_DAYS"):
@@ -192,4 +196,6 @@ class DateRuleWidget(BaseListEditorWidget):
             rule.pop("_type", None)
         for rule in self.date_rules.get("CUSTOM_HOLIDAY_PERIODS", []):
             rule.pop("_type", None)
-        return self.date_rules
+        # 返回深拷贝：避免保存后组件草稿与 global_config 再度共享引用，
+        # 后续编辑同样污染生效配置
+        return copy.deepcopy(self.date_rules)

@@ -113,12 +113,12 @@ class BaseHolidayWidget(BaseListEditorWidget):
         start_date = self.start_edit.date().toString("yyyy-MM-dd")
         end_date = self.end_edit.date().toString("yyyy-MM-dd")
 
-        from infra.date_utils import parse_date_str
+        from infra.date_utils import validate_period
 
-        start = parse_date_str(start_date)
-        end = parse_date_str(end_date)
-        if start is not None and end is not None and start > end:
-            QMessageBox.warning(self, "提示", "开始日期不能晚于结束日期")
+        # 起止校验与时间段编辑弹窗同源（infra.date_utils.validate_period）
+        error = validate_period(start_date, end_date)
+        if error is not None:
+            QMessageBox.warning(self, "提示", error)
             return
 
         self.holiday_periods.append({"name": name, "start": start_date, "end": end_date})
@@ -157,9 +157,10 @@ class BaseHolidayWidget(BaseListEditorWidget):
         return "确定要清空所有节假日吗？"
 
     def save_holidays(self) -> list[dict[str, Any]]:
-        """返回待保存的节假日区间列表。
+        """返回待保存的节假日区间列表（深拷贝）。
 
         不直接写 global_config：由 SettingsPanel.save_config 收集进 pending，
-        全部验证通过后统一写入并落盘，保证保存的事务性。
+        全部验证通过后统一写入并落盘，保证保存的事务性。返回深拷贝，
+        避免保存后组件草稿与 global_config 共享引用（与 DateRuleWidget 口径一致）。
         """
-        return self.holiday_periods
+        return copy.deepcopy(self.holiday_periods)

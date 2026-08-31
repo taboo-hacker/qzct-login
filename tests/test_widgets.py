@@ -356,6 +356,28 @@ class TestBaseHolidayWidget:
         cells = widget._row_to_cells({"name": "测试", "start": "2026-01-01", "end": "2026-01-03"})
         assert len(cells) == 3
 
+    def test_save_holidays_returns_isolated_copy(self, qtbot: QtBot) -> None:
+        """回归（草稿隔离）：save_holidays 返回深拷贝，保存后双方修改互不渗透。"""
+        _ensure_qapp()
+        from gui.widgets.holiday_widget import BaseHolidayWidget
+
+        global_config.clear()
+        global_config.update({"HOLIDAY_PERIODS": []})
+
+        widget = BaseHolidayWidget()
+        qtbot.addWidget(widget)
+        widget.holiday_periods.append({"name": "H1", "start": "2026-01-01", "end": "2026-01-05"})
+
+        saved = widget.save_holidays()
+        assert saved == widget.holiday_periods  # 内容一致
+        assert saved is not widget.holiday_periods  # 但不是同一对象
+
+        # 保存后组件草稿继续编辑（或深改返回值），互不影响生效配置
+        saved[0]["name"] = "MUTATED"
+        widget.holiday_periods.append({"name": "H2", "start": "2026-02-01", "end": "2026-02-02"})
+        assert widget.holiday_periods[0]["name"] == "H1"
+        assert len(saved) == 1
+
 
 class TestCompensatoryWorkdayWidget:
     """CompensatoryWorkdayWidget 测试：调休补班日的展示、排序与保存。"""
@@ -601,3 +623,72 @@ class TestDateRuleWidget:
         rules = widget.save_rules()
         assert 0 in rules["WEEKLY_EXECUTE_DAYS"]
         assert 2 in rules["WEEKLY_EXECUTE_DAYS"]
+
+    def test_draft_isolated_from_global_config(self, qtbot: QtBot) -> None:
+        """回归（草稿隔离）：面板内追加规则不得改写内存中的生效配置。
+
+        旧实现 dict(...) 只做浅拷贝，嵌套 list 与 global_config 共享引用，
+        未点"保存"的编辑直接污染生效配置（且随任一次主题切换被意外落盘）。
+        """
+        _ensure_qapp()
+        from gui.widgets.date_rule_widget import DateRuleWidget
+
+        global_config.clear()
+        global_config.update(
+            {
+                "DATE_RULES": {
+                    "CUSTOM_WORKDAY_PERIODS": [
+                        {"name": "W0", "start": "2026-01-04", "end": "2026-01-05"}
+                    ],
+                    "CUSTOM_HOLIDAY_PERIODS": [
+                        {"name": "H0", "start": "2026-03-01", "end": "2026-03-02"}
+                    ],
+                }
+            }
+        )
+
+        widget = DateRuleWidget()
+        qtbot.addWidget(widget)
+        # 模拟面板内未保存的追加（等价于 _add_item 对草稿列表的 append）
+        widget.date_rules["CUSTOM_WORKDAY_PERIODS"].append(
+            {"name": "W1", "start": "2026-02-01", "end": "2026-02-02", "_type": "workday"}
+        )
+        widget.date_rules["CUSTOM_HOLIDAY_PERIODS"].append(
+            {"name": "H1", "start": "2026-04-01", "end": "2026-04-02", "_type": "holiday"}
+        )
+
+        assert global_config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] == [
+            {"name": "W0", "start": "2026-01-04", "end": "2026-01-05"}
+        ]
+        assert global_config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] == [
+            {"name": "H0", "start": "2026-03-01", "end": "2026-03-02"}
+        ]
+
+    def test_save_rules_returns_isolated_deep_copy(self, qtbot: QtBot) -> None:
+        """回归（草稿隔离）：save_rules 返回深拷贝，保存后双方深层修改互不渗透。"""
+        _ensure_qapp()
+        from gui.widgets.date_rule_widget import DateRuleWidget
+
+        global_config.clear()
+        global_config.update({"DATE_RULES": {}})
+
+        widget = DateRuleWidget()
+        qtbot.addWidget(widget)
+        widget.date_rules["CUSTOM_WORKDAY_PERIODS"].append(
+            {"name": "W1", "start": "2026-02-01", "end": "2026-02-02"}
+        )
+
+        saved = widget.save_rules()
+        assert saved == widget.date_rules  # 内容一致
+        assert saved is not widget.date_rules  # 但不是同一对象
+        assert saved["CUSTOM_WORKDAY_PERIODS"] is not widget.date_rules["CUSTOM_WORKDAY_PERIODS"]
+
+        # 深层修改互不渗透：返回值追加不影响组件草稿，草稿追加不影响返回值
+        saved["CUSTOM_WORKDAY_PERIODS"].append(
+            {"name": "X", "start": "2026-05-01", "end": "2026-05-02"}
+        )
+        widget.date_rules["CUSTOM_WORKDAY_PERIODS"].append(
+            {"name": "Y", "start": "2026-06-01", "end": "2026-06-02"}
+        )
+        assert [r["name"] for r in saved["CUSTOM_WORKDAY_PERIODS"]] == ["W1", "X"]
+        assert [r["name"] for r in widget.date_rules["CUSTOM_WORKDAY_PERIODS"]] == ["W1", "Y"]

@@ -5,16 +5,21 @@ gui/dialogs/* 补充测试
 - PeriodEditDialog（时间段添加/编辑、名称与日期校验）；
 - AboutDialog（构造、复制版本号按钮反馈）；
 - SettingsDialog（构造、滚动区域子页、主题选择与切换、密码可见性切换）。
+另有 SettingsPanel 保存前集中校验（静默失效配置的确认框流程）。
 弹窗提示均已 patch QMessageBox，测试通过 qtbot 管理控件生命周期。
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pytestqt.qtbot import QtBot
 
 from core.config import global_config
 from tests.conftest import ensure_qapp as _ensure_qapp
+
+if TYPE_CHECKING:
+    from gui.dialogs.settings_panel import SettingsPanel
 
 
 class TestPeriodEditDialog:
@@ -330,3 +335,286 @@ class TestSettingsDialog:
 
             saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
             assert saved["THEME"] == "dark"
+
+    def test_on_theme_changed_disk_failure_warns(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """回归（CQ-06）：主题落盘失败应弹提示而非静默，内存主题保留即时生效。"""
+        _ensure_qapp()
+        from PySide6.QtWidgets import QMessageBox
+
+        import gui.dialogs.settings_panel as sp_mod
+        from core.config import DEFAULT_CONFIG
+
+        monkeypatch.setattr(sp_mod, "save_config_to_disk", lambda: False)
+        warned: list[bool] = []
+
+        def _record_warning(*args: object, **kwargs: object) -> None:
+            warned.append(True)
+
+        monkeypatch.setattr(QMessageBox, "warning", staticmethod(_record_warning))
+
+        global_config.clear()
+        global_config.update(DEFAULT_CONFIG)
+
+        from gui.dialogs.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog()
+        qtbot.addWidget(dialog)
+        assert dialog.theme_combo is not None
+        dark_index = dialog.theme_combo.findData("dark")
+        assert dark_index >= 0
+        dialog._on_theme_changed(dark_index)
+
+        assert warned == [True]  # 失败不再静默
+        assert global_config.get("THEME") == "dark"  # 内存主题保留（即时生效优先）
+
+
+class TestSettingsPanelSaveValidation:
+    """SettingsPanel 保存前集中校验：会"静默失效"的配置需经用户确认才落盘。"""
+
+    def _make_panel(self, qtbot: QtBot) -> "SettingsPanel":
+        """以默认配置构造设置面板（配置还原由 conftest 的 autouse 夹具负责）。"""
+        _ensure_qapp()
+        from core.config import DEFAULT_CONFIG
+
+        global_config.clear()
+        global_config.update(DEFAULT_CONFIG)
+
+        from gui.dialogs.settings_panel import SettingsPanel
+
+        panel = SettingsPanel()
+        qtbot.addWidget(panel)
+        return panel
+
+    def _empty_weekly_days_draft(self, panel: "SettingsPanel") -> None:
+        """把面板草稿置为"启用自定义规则但每周执行日一个不勾"。"""
+        assert panel.date_rule_widget is not None
+        assert panel.date_rule_widget.enable_checkbox is not None
+        panel.date_rule_widget.enable_checkbox.setChecked(True)
+        for checkbox in panel.date_rule_widget.weekday_checkboxes.values():
+            checkbox.setChecked(False)
+
+    def test_collect_warnings_empty_weekly_days(self, qtbot: QtBot) -> None:
+        """启用自定义规则但每周执行日为空：应产出"任务将不会执行"警告。"""
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "DATE_RULES": {
+                "ENABLE_CUSTOM_RULE": True,
+                "WEEKLY_EXECUTE_DAYS": [],
+                "CUSTOM_HOLIDAY_PERIODS": [],
+                "CUSTOM_WORKDAY_PERIODS": [],
+            }
+        }
+        warnings = panel._collect_config_warnings(pending)
+        assert warnings == ["启用了自定义日期规则，但未勾选任何每周执行日：任务将不会执行"]
+
+    def test_collect_warnings_no_weekly_days_unenabled_is_clean(self, qtbot: QtBot) -> None:
+        """未启用自定义规则时执行日为空不警告（规则本身未启用，无"静默失效"）。"""
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "DATE_RULES": {
+                "ENABLE_CUSTOM_RULE": False,
+                "WEEKLY_EXECUTE_DAYS": [],
+            }
+        }
+        assert panel._collect_config_warnings(pending) == []
+
+    def test_collect_warnings_overlapping_periods(self, qtbot: QtBot) -> None:
+        """自定义区间列表内部的日期重叠应产出警告，附区间名便于定位。
+
+        基础节假日（HOLIDAY_PERIODS）的重叠是既定设计（默认数据"寒假包含
+        春节"，core/holidays.py 先到先判），即使重叠也不警告——钉死该口径。
+        """
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "HOLIDAY_PERIODS": [
+                {"name": "假期A", "start": "2026-01-01", "end": "2026-01-10"},
+                {"name": "假期B", "start": "2026-01-05", "end": "2026-01-15"},
+            ],
+            "DATE_RULES": {
+                "CUSTOM_HOLIDAY_PERIODS": [
+                    {"name": "自定义假A", "start": "2026-02-01", "end": "2026-02-10"},
+                    # 闭区间共享 02-10 边界即有交集
+                    {"name": "自定义假B", "start": "2026-02-10", "end": "2026-02-20"},
+                ],
+                "CUSTOM_WORKDAY_PERIODS": [
+                    # 无 name：警告文案应回退到起止日期文本
+                    {"name": "", "start": "2026-03-01", "end": "2026-03-05"},
+                    {"name": "", "start": "2026-03-04", "end": "2026-03-08"},
+                ],
+            },
+        }
+        warnings = panel._collect_config_warnings(pending)
+        assert len(warnings) == 2
+        assert not any("基础节假日" in w for w in warnings)
+        assert any("自定义假期区间" in w and "自定义假A" in w for w in warnings)
+        assert any("自定义工作日区间" in w and "2026-03-01~2026-03-05" in w for w in warnings)
+
+    def test_collect_warnings_disjoint_periods_clean(self, qtbot: QtBot) -> None:
+        """相离区间（含首尾相接但不共享日期）不应误报重叠。"""
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "HOLIDAY_PERIODS": [
+                {"name": "A", "start": "2026-01-01", "end": "2026-01-05"},
+                {"name": "B", "start": "2026-01-06", "end": "2026-01-10"},
+                {"name": "C", "start": "2026-02-01", "end": "2026-02-10"},
+            ]
+        }
+        assert panel._collect_config_warnings(pending) == []
+
+    def test_collect_warnings_skips_unparseable_periods(self, qtbot: QtBot) -> None:
+        """起止无法解析的区间跳过检查（不抛异常、不产出误报）。"""
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "HOLIDAY_PERIODS": [
+                {"name": "坏数据", "start": "not-a-date", "end": "2026-01-10"},
+                {"name": "正常", "start": "2026-01-01", "end": "2026-01-05"},
+            ]
+        }
+        assert panel._collect_config_warnings(pending) == []
+
+    def test_collect_warnings_duplicate_compensatory_days(self, qtbot: QtBot) -> None:
+        """调休上班日重复：应列出重复日期，未重复的不列出。"""
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "COMPENSATORY_WORKDAYS": ["2026-01-04", "2026-01-04", "2026-02-28", "2026-01-04"]
+        }
+        warnings = panel._collect_config_warnings(pending)
+        assert len(warnings) == 1
+        assert "重复" in warnings[0]
+        assert "2026-01-04" in warnings[0]
+        assert "2026-02-28" not in warnings[0]
+
+    def test_collect_warnings_clean_config_returns_empty(self, qtbot: QtBot) -> None:
+        """正常配置（有执行日、区间相离、调休无重复）应返回空列表（保存零打扰）。"""
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "DATE_RULES": {
+                "ENABLE_CUSTOM_RULE": True,
+                "WEEKLY_EXECUTE_DAYS": [0, 1, 2, 3, 4],
+                "CUSTOM_HOLIDAY_PERIODS": [
+                    {"name": "假A", "start": "2026-01-01", "end": "2026-01-05"}
+                ],
+                "CUSTOM_WORKDAY_PERIODS": [
+                    {"name": "工A", "start": "2026-02-01", "end": "2026-02-05"}
+                ],
+            },
+            "HOLIDAY_PERIODS": [{"name": "假期", "start": "2026-03-01", "end": "2026-03-05"}],
+            "COMPENSATORY_WORKDAYS": ["2026-01-04", "2026-02-28"],
+        }
+        assert panel._collect_config_warnings(pending) == []
+
+    def test_collect_warnings_default_config_zero_noise(self, qtbot: QtBot) -> None:
+        """默认数据（寒假⊇春节重叠的 HOLIDAY_PERIODS）保存必须零警告。
+
+        钉死口径：基础节假日重叠是 core/holidays.py 既定设计（先到先判），
+        不参与重叠检查；自定义列表默认为空；调休默认无重复。
+        """
+        from copy import deepcopy
+
+        from core.config import DEFAULT_CONFIG
+
+        panel = self._make_panel(qtbot)
+        pending: dict[str, object] = {
+            "DATE_RULES": deepcopy(DEFAULT_CONFIG["DATE_RULES"]),
+            "HOLIDAY_PERIODS": deepcopy(DEFAULT_CONFIG["HOLIDAY_PERIODS"]),
+            "COMPENSATORY_WORKDAYS": deepcopy(DEFAULT_CONFIG["COMPENSATORY_WORKDAYS"]),
+        }
+        assert panel._collect_config_warnings(pending) == []
+
+    def test_save_config_warning_dialog_defaults_no(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """含警告时确认框标题应为"配置检查提示"且默认聚焦"否"（防回车误保存）。"""
+        from PySide6.QtWidgets import QMessageBox
+
+        panel = self._make_panel(qtbot)
+        self._empty_weekly_days_draft(panel)
+
+        captured: dict[str, object] = {}
+
+        def fake_question(
+            parent: object,
+            title: str,
+            text: str,
+            buttons: object = None,
+            default_button: object = None,
+        ) -> object:
+            captured["title"] = title
+            captured["text"] = text
+            captured["buttons"] = buttons
+            captured["default_button"] = default_button
+            return QMessageBox.StandardButton.No
+
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(fake_question))
+        panel.save_config()
+
+        assert captured["title"] == "配置检查提示"
+        assert "每周执行日" in str(captured["text"])
+        assert "仍要保存" in str(captured["text"])
+        assert captured["buttons"] == (
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        assert captured["default_button"] == QMessageBox.StandardButton.No
+
+    def test_save_config_cancel_on_warnings_keeps_config(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """确认框选"否"：不写入 global_config、不落盘、不发 config_saved。"""
+        from PySide6.QtWidgets import QMessageBox
+
+        import gui.dialogs.settings_panel as sp_mod
+
+        panel = self._make_panel(qtbot)
+        self._empty_weekly_days_draft(panel)
+
+        disk_calls: list[bool] = []
+
+        def _record_disk_call() -> bool:
+            disk_calls.append(True)
+            return True
+
+        monkeypatch.setattr(sp_mod, "save_config_to_disk", _record_disk_call)
+        monkeypatch.setattr(
+            QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+        )
+        saved_signals: list[bool] = []
+        panel.config_saved.connect(lambda: saved_signals.append(True))
+
+        before = global_config.snapshot()
+        panel.save_config()
+
+        assert disk_calls == []  # 未落盘
+        assert saved_signals == []  # 未发保存成功信号
+        assert global_config.snapshot() == before  # 配置未被写入
+
+    def test_save_config_confirm_on_warnings_still_saves(
+        self, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """确认框选"仍要保存"：照常写入 global_config 并落盘（知情确认优先）。"""
+        from PySide6.QtWidgets import QMessageBox
+
+        import core.config as cfg_module
+
+        monkeypatch.setattr(cfg_module, "CONFIG_DIR", str(tmp_path))
+        monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(tmp_path / "config.json"))
+
+        panel = self._make_panel(qtbot)
+        self._empty_weekly_days_draft(panel)
+
+        question_calls: list[bool] = []
+
+        def _confirm_save(*args: object, **kwargs: object) -> QMessageBox.StandardButton:
+            question_calls.append(True)
+            return QMessageBox.StandardButton.Yes
+
+        monkeypatch.setattr(QMessageBox, "question", staticmethod(_confirm_save))
+
+        assert panel.wifi_name_edit is not None
+        panel.wifi_name_edit.setText("WarnWiFi")
+        panel.save_config()
+
+        assert question_calls == [True]  # 确实弹出了确认框
+        assert global_config.get("WIFI_NAME") == "WarnWiFi"
+        assert (tmp_path / "config.json").exists()

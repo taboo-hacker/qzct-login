@@ -7,6 +7,7 @@ SettingsDialog 是其对话框包装。修改后点击"保存配置"生效，
 """
 
 from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -36,6 +37,7 @@ from gui.styling.widgets import (
     create_tip_label,
 )
 from gui.widgets import BaseHolidayWidget, CompensatoryWorkdayWidget, DateRuleWidget
+from infra.date_utils import parse_date_str
 
 
 class SettingsPanel(QWidget):
@@ -153,7 +155,12 @@ class SettingsPanel(QWidget):
             global_config["THEME"] = theme_name
             # 主题即时生效也即时落盘：否则用户切完主题直接退出，
             # 下次启动会回退到旧主题（"即时生效"的预期含持久化）
-            save_config_to_disk()
+            if not save_config_to_disk():
+                # 落盘失败不回滚内存主题（即时生效体验优先），但要告知用户
+                # 重启后将恢复原主题，避免形成"已持久化"的错觉
+                QMessageBox.warning(
+                    self, "提示", "主题已切换，但保存到磁盘失败，重启后将恢复原主题"
+                )
             self.theme_changed.emit(theme_name)
 
     def _create_form_tab(self) -> tuple[QWidget, QFormLayout]:
@@ -366,6 +373,86 @@ class SettingsPanel(QWidget):
             QMessageBox.warning(self, "提示", err_msg)
             return None
 
+    # ------------------------------------------------------------------
+    # 保存前配置检查（会"静默失效"的配置集中提示）
+    # ------------------------------------------------------------------
+
+    def _collect_config_warnings(self, pending: dict[str, object]) -> list[str]:
+        """收集会"静默失效"的配置问题（每条一行，附涉及名称便于定位）。
+
+        仅提示不阻断：命中任何一项都由 save_config 弹确认框交由用户决定
+        （仍要保存 / 回去修改）；正常配置返回空列表，保存零打扰。
+        """
+        warnings: list[str] = []
+
+        date_rules = pending.get("DATE_RULES")
+        if isinstance(date_rules, dict):
+            # 1) 启用自定义规则但每周执行日一个不勾：任务将永不执行
+            if date_rules.get("ENABLE_CUSTOM_RULE") and not date_rules.get("WEEKLY_EXECUTE_DAYS"):
+                warnings.append("启用了自定义日期规则，但未勾选任何每周执行日：任务将不会执行")
+            # 2) 自定义区间列表内部的日期重叠：实际生效由隐藏的优先级阶梯决定。
+            #    基础节假日（HOLIDAY_PERIODS）不做重叠检查——默认数据本身
+            #    "寒假包含春节"是既定设计（core/holidays.py 先到先判），检查即噪音
+            warnings.extend(
+                self._overlap_warnings(date_rules.get("CUSTOM_HOLIDAY_PERIODS"), "自定义假期区间")
+            )
+            warnings.extend(
+                self._overlap_warnings(date_rules.get("CUSTOM_WORKDAY_PERIODS"), "自定义工作日区间")
+            )
+
+        # 3) 调休上班日重复：同一日期重复出现没有意义，提示用户清理
+        compensatory = pending.get("COMPENSATORY_WORKDAYS")
+        if isinstance(compensatory, list):
+            seen_days: set[str] = set()
+            duplicate_days: list[str] = []
+            for day in compensatory:
+                if not isinstance(day, str):
+                    continue
+                if day in seen_days and day not in duplicate_days:
+                    duplicate_days.append(day)
+                seen_days.add(day)
+            if duplicate_days:
+                warnings.append("调休上班日中存在重复日期：" + "、".join(duplicate_days))
+
+        return warnings
+
+    @classmethod
+    def _overlap_warnings(cls, periods: object, section_label: str) -> list[str]:
+        """检查单个区间列表内部的日期重叠，逐对生成警告行（非列表输入安全跳过）。"""
+        if not isinstance(periods, list):
+            return []
+        warnings: list[str] = []
+        for i in range(len(periods)):
+            for j in range(i + 1, len(periods)):
+                period_a, period_b = periods[i], periods[j]
+                if not isinstance(period_a, dict) or not isinstance(period_b, dict):
+                    continue
+                if cls._periods_overlap(period_a, period_b):
+                    warnings.append(
+                        f"{section_label}中区间「{cls._period_label(period_a)}」与"
+                        f"「{cls._period_label(period_b)}」日期重叠，实际生效由优先级决定"
+                    )
+        return warnings
+
+    @staticmethod
+    def _periods_overlap(period_a: dict[str, Any], period_b: dict[str, Any]) -> bool:
+        """判断两个闭区间 [start, end] 是否有交集；任一端点不可解析按不重叠处理。"""
+        start_a = parse_date_str(period_a.get("start"))
+        end_a = parse_date_str(period_a.get("end"))
+        start_b = parse_date_str(period_b.get("start"))
+        end_b = parse_date_str(period_b.get("end"))
+        if start_a is None or end_a is None or start_b is None or end_b is None:
+            return False
+        return start_a <= end_b and start_b <= end_a
+
+    @staticmethod
+    def _period_label(period: dict[str, Any]) -> str:
+        """区间显示名：优先 name 字段，缺省回退到起止日期文本。"""
+        name = str(period.get("name") or "").strip()
+        if name:
+            return name
+        return f"{period.get('start', '')}~{period.get('end', '')}"
+
     def save_config(self) -> None:
         """保存配置——先收集到临时 dict，全部验证通过后统一写入 global_config"""
         # _init_ui 保证以下控件已初始化
@@ -441,6 +528,21 @@ class SettingsPanel(QWidget):
         # 应用程序设置
         pending["SHOW_LUNAR_CALENDAR"] = self.show_lunar_check.isChecked()
         pending["LUNAR_DISPLAY_FORMAT"] = self.lunar_format_combo.currentIndex()
+
+        # 保存前集中检查会"静默失效"的配置（执行日为空 / 区间重叠 / 调休重复）：
+        # 有命中先弹确认框，用户选"否"可回去修改，选"仍要保存"才继续写入
+        config_warnings = self._collect_config_warnings(pending)
+        if config_warnings:
+            answer = QMessageBox.question(
+                self,
+                "配置检查提示",
+                "\n".join(config_warnings) + "\n\n仍要保存吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                # 默认聚焦"否"：命中提示的问题多需回去修改，防止回车误确认
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
 
         # 所有验证通过，统一写入 global_config；先备份内存配置，
         # 落盘失败时回滚——保证内存与文件始终一致（事务性）

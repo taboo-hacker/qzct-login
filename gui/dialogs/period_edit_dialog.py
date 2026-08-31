@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from gui.styling.constants import FontSize
 from gui.styling.widgets import create_button, create_card_widget, create_label
-from infra.date_utils import parse_date_str
+from infra.date_utils import parse_date_str, validate_period
 
 
 class PeriodEditDialog(QDialog):
@@ -138,10 +138,10 @@ class PeriodEditDialog(QDialog):
         start_date = self.start_edit.date().toString("yyyy-MM-dd")
         end_date = self.end_edit.date().toString("yyyy-MM-dd")
 
-        start = parse_date_str(start_date)
-        end = parse_date_str(end_date)
-        if start is not None and end is not None and start > end:
-            QMessageBox.warning(self, "提示", "开始日期不能晚于结束日期")
+        # 起止校验与基础节假日表单同源（infra.date_utils.validate_period）
+        error = validate_period(start_date, end_date)
+        if error is not None:
+            QMessageBox.warning(self, "提示", error)
             return
 
         self.result_period = {
