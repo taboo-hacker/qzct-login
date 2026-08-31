@@ -145,3 +145,6 @@ site/
 
 # 优化流程备份目录（本地保留，不入库）
 backup/
+
+# project-auto-optimizer 工作目录（检查点/报告/锁，内部产物不入库；正式报告见 docs/reports/）
+.optimizer/
