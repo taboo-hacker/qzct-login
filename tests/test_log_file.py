@@ -8,6 +8,7 @@ D3 测试：日志文件落盘配置
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from loguru import logger
@@ -81,6 +82,39 @@ class TestSetupLoggerFileLogging:
 
         # 不应抛出异常
         logger.info("test without file")
+
+
+class TestCrashLog:
+    """main._write_crash_log 测试：crash.log 兜底落盘、写入后收权与容错。"""
+
+    def test_write_crash_log_writes_and_restricts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """写入 crash.log 后文件应包含消息，并以该文件路径调用收权函数。"""
+        import main
+
+        monkeypatch.setattr("core.constants.CONFIG_DIR", str(tmp_path))
+        # _write_crash_log 内部延迟导入 infra.file_permissions，patch 模块属性即生效
+        with patch("infra.file_permissions.restrict_file_permissions") as mock_restrict:
+            main._write_crash_log("Fatal error: X")
+
+        crash_log = tmp_path / "crash.log"
+        assert crash_log.exists()
+        assert "Fatal error: X" in crash_log.read_text(encoding="utf-8")
+        mock_restrict.assert_called_once_with(str(crash_log))
+
+    def test_write_crash_log_swallows_errors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CONFIG_DIR 指向普通文件（路径不可写）时应静默吞掉异常，不向调用方抛错。"""
+        import main
+
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a dir", encoding="utf-8")
+        monkeypatch.setattr("core.constants.CONFIG_DIR", str(blocker))
+
+        # 不应抛出 NotADirectoryError 等任何异常（excepthook 最后一级不得自身崩溃）
+        main._write_crash_log("Fatal error: Y")
 
 
 class TestLogFileConstant:

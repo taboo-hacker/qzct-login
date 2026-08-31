@@ -75,6 +75,8 @@ def setup_logger(
                 pass
         restrict_file_permissions(log_file)
 
+        # 轮转后新文件的权限由 main() 设置的进程 umask(0o077) 覆盖（POSIX）；
+        # 初始文件的显式收权见上方 restrict_file_permissions；Windows 下继承用户目录 ACL
         logger.add(
             log_file,
             level=level,
