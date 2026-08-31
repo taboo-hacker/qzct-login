@@ -1,16 +1,44 @@
 {
   "skill": "project-auto-optimizer v7.0",
-  "updated": "2026-08-31T21:10:00",
+  "updated": "2026-08-31T22:20:00",
   "phase": "三（自动执行）",
   "iteration": 1,
   "backup_dir": "backup/优化前-20260831-202147/",
-  "baseline": {"pytest": "309 passed, 1 skipped", "mypy": "clean", "ruff": "clean", "black": "clean", "isort": "clean"},
+  "baseline": {
+    "pytest": "309 passed, 1 skipped",
+    "mypy": "clean",
+    "ruff": "clean",
+    "black": "clean",
+    "isort": "clean"
+  },
   "tasks": [
-    {"id": "T1", "desc": "安全加固（verify=False/TOCTOU/thumbprint/ACL）", "status": "done", "commit": "871c1f1"},
-    {"id": "T2", "desc": "核心缺陷：链失败误报成功/零配置自动执行/core 弹窗上移", "status": "in_progress"},
-    {"id": "T3", "desc": "质量重构：死代码/重复/ISP 单源/日历复用 core", "status": "pending"},
-    {"id": "T4", "desc": "UX：状态栏时钟/防重入/返回值/对比度/文案", "status": "pending"},
-    {"id": "T5", "desc": "测试补充 + conftest 收敛 + 文档同步", "status": "pending"}
+    {
+      "id": "T1",
+      "desc": "安全加固（verify=False/TOCTOU/thumbprint/ACL）",
+      "status": "done",
+      "commit": "871c1f1"
+    },
+    {
+      "id": "T2",
+      "desc": "核心缺陷：链失败误报成功/零配置自动执行/core 弹窗上移",
+      "status": "in_progress"
+    },
+    {
+      "id": "T3",
+      "desc": "质量重构：死代码/重复/ISP 单源/日历复用 core",
+      "status": "done",
+      "commit": "f0f1634"
+    },
+    {
+      "id": "T4",
+      "desc": "UX：状态栏时钟/防重入/返回值/对比度/文案",
+      "status": "in_progress"
+    },
+    {
+      "id": "T5",
+      "desc": "测试补充 + conftest 收敛 + 文档同步",
+      "status": "pending"
+    }
   ],
   "pending_confirm": [
     "凭据 HTTP 明文传输：网关仅支持 http，无法单方面修复，已加文档提示",

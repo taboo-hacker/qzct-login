@@ -84,6 +84,8 @@ class MainWindow(QMainWindow):
         self.resize(800, 500)
         self._force_quit = False
         self._task_chain_started: bool = False
+        # 本次会话是否成功设置过定时关机（退出时据此提醒"退出不会取消关机"）
+        self._shutdown_scheduled: bool = False
 
         # 日志组件先创建，供日志系统使用
         self.log_text = LogTextEdit()
@@ -297,6 +299,11 @@ class MainWindow(QMainWindow):
         h.addWidget(self.footer_status)
         h.addStretch(1)
 
+        # 常驻时钟（独立标签）：与业务状态分区显示，每秒刷新不冲掉状态反馈
+        self.clock_label = QLabel(datetime.datetime.now().strftime("%H:%M:%S"))
+        self.clock_label.setProperty("role", "muted")
+        h.addWidget(self.clock_label)
+
         self.about_btn = create_button("关于", btn_type="text", min_height=24)
         self.about_btn.setToolTip("关于 (F1)")
         self.about_btn.setShortcut("F1")
@@ -318,21 +325,21 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _update_time_display(self) -> None:
-        """每秒刷新底部状态栏时钟（活跃任务期间让位给任务进度信息）。"""
-        # 有活跃任务时不覆盖状态栏，避免覆盖任务进度信息
-        if self.task_executor and self.task_executor.active_count > 0:
-            return
-        now = datetime.datetime.now()
-        time_str = now.strftime("%H:%M:%S")
-        if hasattr(self, "footer_status"):
-            self.footer_status.setText(f"就绪  |  {time_str}")
+        """每秒刷新底部时钟。
 
-    def _set_buttons_enabled(self, enabled: bool) -> None:
-        """任务运行期间禁用任务相关按钮，结束后恢复（防止重复触发）。"""
+        时钟是独立的常驻标签，不与业务状态共用 footer_status——
+        否则每秒刷新会把"正在测试/已保存"等瞬时反馈立即冲掉。
+        """
+        now = datetime.datetime.now()
+        if hasattr(self, "clock_label"):
+            self.clock_label.setText(now.strftime("%H:%M:%S"))
+
+    def _set_buttons_enabled(self, enabled: bool, busy_text: str = "运行中...") -> None:
+        """任务/测试运行期间禁用任务相关按钮，结束后恢复（防止重复触发）。"""
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
-        self.run_btn.setText("立即执行" if enabled else "运行中...")
+        self.run_btn.setText("立即执行" if enabled else busy_text)
 
     def _update_status_display(self) -> None:
         """刷新左侧卡片：日期、执行状态徽标、生效规则来源、关机时间。
@@ -487,6 +494,9 @@ class MainWindow(QMainWindow):
 
         hh = int(global_config.get("SHUTDOWN_HOUR", 23))
         mm = int(global_config.get("SHUTDOWN_MIN", 0))
+        if shutdown_set:
+            # 记录本次会话已设置关机：退出程序时的提醒与取消入口都依赖它
+            self._shutdown_scheduled = True
         if failed:
             fail_text = "、".join(failed)
             summary = (
@@ -519,24 +529,89 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def on_run_once(self) -> None:
-        """「立即执行」按钮：确认后手动触发一次完整任务链（Ctrl+R）。"""
+        """「立即执行」按钮：确认后手动触发一次完整任务链（Ctrl+R）。
+
+        确认框默认聚焦"否"：执行链会设置定时关机，属危险操作，回车不应直接放行。
+        """
         if (
-            QMessageBox.question(self, "确认", "是否立即执行一次完整任务（WiFi+登录+关机）？")
+            QMessageBox.question(
+                self,
+                "确认",
+                "是否立即执行一次完整任务（WiFi+登录+关机）？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
             == QMessageBox.StandardButton.Yes
         ):
             info("main", "用户手动触发：开始执行完整任务链")
             self.start_task_chain()
 
     def on_cancel_shutdown(self) -> None:
-        """「取消关机」按钮：确认后执行 shutdown /a 中止待执行的关机任务。"""
+        """「取消关机」按钮：确认后在后台执行 shutdown /a，并按返回值反馈结果。"""
         if (
-            QMessageBox.question(self, "确认", "是否取消已设置的关机任务？")
-            == QMessageBox.StandardButton.Yes
+            QMessageBox.question(
+                self,
+                "确认",
+                "是否取消已设置的关机任务？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
         ):
-            cancel_shutdown()
+            return
+
+        # 防重入：任务链/其他测试进行中时不再受理
+        if not self.run_btn.isEnabled():
+            info("main", "已有任务进行中，忽略取消关机请求")
+            return
+
+        self._set_buttons_enabled(False, busy_text="取消中...")
+        self.footer_status.setText("正在取消关机...")
+
+        def _do_cancel_shutdown(ctx: TaskContext) -> bool:
+            """后台线程执行取消命令（shutdown /a 最坏可阻塞 10 秒，不能卡界面）。"""
+            return cancel_shutdown()
+
+        self._run_background_test(
+            _do_cancel_shutdown,
+            "cancel_shutdown",
+            self._on_cancel_shutdown_finished,
+            self._on_cancel_shutdown_error,
+        )
+
+    def _on_cancel_shutdown_finished(self, task_name: str, result: object) -> None:
+        """取消关机完成：按返回值区分成功/失败反馈。"""
+        self._set_buttons_enabled(True)
+        if result is True:
+            self._shutdown_scheduled = False
             info("main", "用户手动取消了已设置的关机任务")
             self.footer_status.setText("已取消关机")
-            QMessageBox.information(self, "完成", "已尝试取消关机任务")
+            QMessageBox.information(self, "完成", "已成功取消关机任务")
+        else:
+            error("main", "取消关机任务失败（shutdown /a 返回失败）", exc_info=False)
+            self.footer_status.setText("取消关机失败")
+            QMessageBox.warning(
+                self,
+                "错误",
+                "取消关机任务失败！\n\n电脑仍会按计划关机，"
+                "请手动打开命令行执行 shutdown /a，详情见运行日志。",
+            )
+
+    def _on_cancel_shutdown_error(self, task_name: str, error_msg: str) -> None:
+        """取消关机线程抛异常时的错误提示。"""
+        self._set_buttons_enabled(True)
+        self.footer_status.setText("取消关机出错")
+        error("main", f"取消关机异常：{error_msg}")
+        QMessageBox.critical(self, "错误", f"取消关机出错：{self._friendly_error(error_msg)}")
+
+    @staticmethod
+    def _friendly_error(error_msg: str) -> str:
+        """把技术异常信息映射为用户可读文案（技术细节保留在日志里）。"""
+        if error_msg.startswith("TimeoutError"):
+            return "操作超时，请检查网络环境后重试"
+        if error_msg.startswith("ConnectionError") or error_msg.startswith("RequestException"):
+            return "网络连接失败，请检查网络后重试"
+        return error_msg
 
     def on_test_wifi(self) -> None:
         """「测试 WiFi」按钮：后台线程单独测试 WiFi 连接（不走任务链）。
@@ -555,6 +630,12 @@ class MainWindow(QMainWindow):
         ):
             return
 
+        # 防重入：任务链/其他测试进行中时不再受理（避免并发操作 WiFi）
+        if not self.run_btn.isEnabled():
+            info("main", "已有任务进行中，忽略 WiFi 测试请求")
+            return
+
+        self._set_buttons_enabled(False, busy_text="测试中...")
         self.footer_status.setText("正在测试 WiFi...")
         info("main", f"开始测试 WiFi 连接：{wifi_name}")
         self._test_wifi_name = wifi_name
@@ -578,6 +659,7 @@ class MainWindow(QMainWindow):
 
     def _on_wifi_test_finished(self, task_name: str, result: object) -> None:
         """WiFi 测试完成：按状态码弹出对应结果提示。"""
+        self._set_buttons_enabled(True)
         wifi_name = getattr(self, "_test_wifi_name", "")
         if result == "already_connected":
             info("main", f"已成功连接到 WiFi：{wifi_name}")
@@ -602,15 +684,16 @@ class MainWindow(QMainWindow):
 
     def _on_wifi_test_error(self, task_name: str, error_msg: str) -> None:
         """WiFi 测试线程抛异常时的错误提示。"""
+        self._set_buttons_enabled(True)
         self.footer_status.setText("WiFi 测试出错")
         error("main", f"WiFi 测试异常：{error_msg}")
-        QMessageBox.critical(self, "错误", f"WiFi 测试出错：{error_msg}")
+        QMessageBox.critical(self, "错误", f"WiFi 测试出错：{self._friendly_error(error_msg)}")
 
     def on_test_login(self) -> None:
         """「测试登录」按钮：后台线程单独测试校园网认证（不走任务链）。
 
-        详细结果写入运行日志（campus_login 内部已分级记录），
-        弹窗仅提示"完成，请查看日志"。
+        按返回值区分成功/失败弹窗，详细过程写入运行日志
+        （campus_login 内部已分级记录）。
         """
         username = global_config.get("USERNAME", "")
         if not username:
@@ -623,6 +706,12 @@ class MainWindow(QMainWindow):
         ):
             return
 
+        # 防重入：任务链/其他测试进行中时不再受理
+        if not self.run_btn.isEnabled():
+            info("main", "已有任务进行中，忽略登录测试请求")
+            return
+
+        self._set_buttons_enabled(False, busy_text="测试中...")
         self.footer_status.setText("正在测试登录...")
         info("main", "测试校园网登录")
 
@@ -661,18 +750,32 @@ class MainWindow(QMainWindow):
         executor.shutdown(wait=False)
 
     def _on_login_test_finished(self, task_name: str, result: object) -> None:
-        """登录测试完成提示（成败详情见运行日志）。"""
-        self.footer_status.setText("登录测试完成")
-        QMessageBox.information(
-            self,
-            "测试结果",
-            "校园网登录测试完成，请查看日志了解详细结果",
-        )
+        """登录测试完成：按返回值区分成功/失败（详细过程见运行日志）。"""
+        self._set_buttons_enabled(True)
+        if result is True:
+            info("main", "校园网登录测试成功")
+            self.footer_status.setText("登录测试成功")
+            QMessageBox.information(self, "测试结果", "校园网登录测试成功")
+        else:
+            error("main", "校园网登录测试失败", exc_info=False)
+            self.footer_status.setText("登录测试失败")
+            QMessageBox.warning(
+                self,
+                "测试结果",
+                "校园网登录测试失败\n\n"
+                "请检查：\n"
+                "- 账号密码是否正确\n"
+                "- 运营商类型是否匹配\n"
+                "- 网络是否连通\n\n"
+                "详情见运行日志",
+            )
 
     def _on_login_test_error(self, task_name: str, error_msg: str) -> None:
         """登录测试线程抛异常时的错误提示。"""
+        self._set_buttons_enabled(True)
         self.footer_status.setText("登录测试失败")
-        QMessageBox.critical(self, "错误", f"校园网登录测试失败：{error_msg}")
+        error("main", f"校园网登录测试异常：{error_msg}")
+        QMessageBox.critical(self, "错误", f"校园网登录测试失败：{self._friendly_error(error_msg)}")
 
     def on_settings(self) -> None:
         """切换到设置标签页（嵌入式设置，不再弹窗）。"""
@@ -713,7 +816,20 @@ class MainWindow(QMainWindow):
         info("main", "已显示主窗口")
 
     def _real_close(self) -> None:
-        """真实退出：置强制退出标志后触发 closeEvent 走完整清理流程。"""
+        """真实退出：确认关机仍在生效后置标志，触发 closeEvent 走完整清理流程。"""
+        # 已设置定时关机时提醒一次：关机由 Windows 调度，退出程序不会取消它
+        if self._shutdown_scheduled:
+            ret = QMessageBox.question(
+                self,
+                "确认退出",
+                "确定退出程序？\n\n"
+                "注意：已设置的定时关机由 Windows 调度，退出本程序后仍会按时执行；"
+                "如需取消请先点「取消关机」。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
         self._force_quit = True
         self.close()
 

@@ -32,10 +32,11 @@ class ThemeColors:
     warning_bg: str = "#FFF3E0"
     danger_bg: str = "#FFEBEE"
 
-    # 文本色（style_helpers 中 create_tip_label 等少量使用）
+    # 文本色（style_helpers 中 create_tip_label 等少量使用；
+    # 亮/暗两侧均按 WCAG AA（≥4.5:1）对最浅卡片背景校准）
     text_primary: str = "#1F1F1F"
     text_secondary: str = "#666666"
-    text_tertiary: str = "#999999"
+    text_tertiary: str = "#6B6B6B"
 
     # ---- 界面配色（全局 QSS 使用，qss.build_qss 消费） ----
     window_bg: str = "#F5F6F8"
@@ -59,7 +60,11 @@ def create_light_theme() -> ThemeColors:
 
 
 def create_dark_theme() -> ThemeColors:
-    """暗色主题：逐字段覆盖配色（背景加深、文字提亮、语义色降饱和防刺眼）。"""
+    """暗色主题：逐字段覆盖配色（背景加深、文字提亮）。
+
+    语义色按钮配白色文字，底色取 Material 800 级深色调，
+    保证白字对比度 ≥ WCAG AA（4.5:1）。
+    """
     return ThemeColors(
         name="dark",
         log_debug="#707070",
@@ -67,18 +72,18 @@ def create_dark_theme() -> ThemeColors:
         log_warning="#E89540",
         log_error="#E85E5E",
         log_critical="#D04848",
-        primary="#4DA3E8",
-        primary_dark="#3395DD",
-        success="#5EC75E",
-        warning="#E89540",
-        danger="#E85E5E",
+        primary="#1565C0",
+        primary_dark="#0D47A1",
+        success="#2E7D32",
+        warning="#A06000",
+        danger="#C62828",
         primary_bg="#1A3A52",
         success_bg="#1B3B1F",
         warning_bg="#3D2E14",
         danger_bg="#3B1B1B",
         text_primary="#E0E0E0",
         text_secondary="#A0A0A0",
-        text_tertiary="#707070",
+        text_tertiary="#9A9A9A",
         window_bg="#1F1F1F",
         card_bg="#2A2A2A",
         card_border="#3E3E3E",

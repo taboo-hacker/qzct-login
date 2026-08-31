@@ -223,7 +223,7 @@ class SettingsPanel(QWidget):
 
         self.wan_ip_edit = QLineEdit()
         self.wan_ip_edit.setText(global_config.get("WAN_IP", DEFAULT_CONFIG["WAN_IP"]))
-        self.wan_ip_edit.setPlaceholderText("请输入 WAN IP 地址")
+        self.wan_ip_edit.setPlaceholderText("通常留空，由网关自动获取")
         self.wan_ip_edit.setMinimumHeight(30)
         login_layout.addRow("WAN IP：", self.wan_ip_edit)
 

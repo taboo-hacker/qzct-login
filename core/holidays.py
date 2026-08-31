@@ -78,7 +78,7 @@ def check_holiday_data_freshness() -> str | None:
 
     if current_year > latest_year:
         return (
-            f"假期数据仅覆盖到 {latest_year} 年，当前年份 {current_year} 的数据缺失。"
-            "请更新 core/holidays.py 中的假期数据。"
+            f"节假日数据仅覆盖到 {latest_year} 年（{current_year} 年数据缺失），"
+            "假期判断与任务日历可能不准确，请到项目主页获取新版本程序。"
         )
     return None
