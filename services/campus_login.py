@@ -11,8 +11,8 @@ from typing import Any
 import requests
 from requests.exceptions import RequestException
 
-from core.config import ISP_MAPPING, get_config_snapshot
-from core.constants import CAMPUS_LOGIN_CONFIG, CAMPUS_LOGIN_HEADERS
+from core.config import get_config_snapshot
+from core.constants import CAMPUS_LOGIN_CONFIG, CAMPUS_LOGIN_HEADERS, ISP_MAPPING
 from core.exceptions import CampusAuthError, CampusNetworkError, JSONPParseError
 from infra.logging import error, info
 
@@ -73,7 +73,7 @@ def campus_login(cfg: dict[str, Any] | None = None) -> bool:
     if cfg is None:
         cfg = get_config_snapshot()
     isp_type = cfg.get("ISP_TYPE", "telecom")
-    isp_suffix = ISP_MAPPING.get(isp_type, "@telecom")
+    isp_suffix = ISP_MAPPING.get(isp_type, ISP_MAPPING["telecom"])[0]
 
     callback: str = CAMPUS_LOGIN_CONFIG["callback"]
     login_url: str = CAMPUS_LOGIN_CONFIG["login_url"]

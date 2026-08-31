@@ -7,10 +7,11 @@
 import contextlib
 import datetime
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -27,6 +28,7 @@ from core.config import global_config, load_config
 from core.constants import CONFIG_FILE, LOG_FILE
 from core.date_rules import should_work_today
 from gui.dialogs import AboutDialog, SettingsPanel
+from gui.log_sink import QtLogSink
 from gui.styling.theme_manager import ThemeManager
 from gui.styling.widgets import LogTextEdit, create_button, create_card_widget
 from gui.tray_manager import TrayManager
@@ -47,7 +49,7 @@ from services.tasks import (
     task_connect_wifi,
     task_set_shutdown,
 )
-from services.wifi import connect_wifi, is_wifi_connected
+from services.wifi import connect_wifi, interruptible_sleep, is_wifi_connected
 from utils.version import get_project_version
 
 
@@ -86,8 +88,10 @@ class MainWindow(QMainWindow):
         # 日志组件先创建，供日志系统使用
         self.log_text = LogTextEdit()
 
-        # 初始化日志（日志文件落盘到 ~/.qzct/qzct.log，10MB 轮转、保留 35 天）
-        init_logger(gui_log_widget=self.log_text, log_file_path=LOG_FILE, level=1)
+        # 初始化日志（日志文件落盘到 ~/.qzct/qzct.log，10MB 轮转、保留 35 天）；
+        # GUI sink 由本层绑定 QtLogSink 后以回调注入，utils/infra 不反向依赖 gui
+        QtLogSink.set_gui_widget(self.log_text)
+        init_logger(gui_sink=QtLogSink.instance().write, log_file_path=LOG_FILE, level=1)
 
         # 必须先加载配置并应用保存的主题，再构建界面：
         # 设置面板/状态显示在构建时读取 global_config，顺序颠倒会导致
@@ -102,11 +106,10 @@ class MainWindow(QMainWindow):
             )
         ThemeManager.set_theme(str(global_config.get("THEME", "light")))
 
-        # 构建界面（此时 global_config 已是加载后的值）
+        # 构建界面（此时 global_config 已是加载后的值）；
+        # 万年历在 _init_ui 内部已随主题刷新（update_theme 含标记执行日期），
+        # 这里不再重复调用
         self._init_ui()
-
-        # 万年历视图使用调色板/内联色，需按当前主题刷新一次
-        self._calendar_view.update_theme()
 
         # 重定向输出
         self._original_stdout = sys.stdout
@@ -165,6 +168,10 @@ class MainWindow(QMainWindow):
 
         # --- 底部状态行 ---
         v_root.addLayout(self._create_footer())
+
+        # 全局快捷键（窗口级）：设置页 / 任务日历
+        QShortcut(QKeySequence("Ctrl+,"), self, self.on_settings)
+        QShortcut(QKeySequence("Ctrl+K"), self, self.show_calendar)
 
         self._update_status_display()
 
@@ -559,22 +566,15 @@ class MainWindow(QMainWindow):
             wifi_password = global_config.get("WIFI_PASSWORD", "")
             if connect_wifi(wifi_name, wifi_password):
                 # 等待连接稳定后再验证（分片睡眠，任务取消时可提前退出）
-                from services.wifi import _interruptible_sleep
-
-                _interruptible_sleep(3, ctx.is_cancelled)
+                interruptible_sleep(3, ctx.is_cancelled)
                 if is_wifi_connected(wifi_name):
                     return "connected"  # 连接成功且稳定
                 return "failed_after_connect"  # 发起连接但未稳定连上
             return "connect_command_failed"  # 连接命令执行失败
 
-        executor = TaskExecutor(max_workers=1)
-        self._test_executors.append(executor)
-        executor.finished.connect(self._on_wifi_test_finished)
-        executor.error.connect(self._on_wifi_test_error)
-        # 任务完成后从列表中移除（避免长期持有已结束的线程池）
-        executor.finished.connect(lambda *_: self._release_test_executor(executor))
-        executor.error.connect(lambda *_: self._release_test_executor(executor))
-        executor.submit(_do_wifi_test, "test_wifi")
+        self._run_background_test(
+            _do_wifi_test, "test_wifi", self._on_wifi_test_finished, self._on_wifi_test_error
+        )
 
     def _on_wifi_test_finished(self, task_name: str, result: object) -> None:
         """WiFi 测试完成：按状态码弹出对应结果提示。"""
@@ -630,13 +630,29 @@ class MainWindow(QMainWindow):
             """后台线程执行登录测试，成功与否都通过 finished 信号回报。"""
             return campus_login()
 
+        self._run_background_test(
+            _do_login_test, "test_login", self._on_login_test_finished, self._on_login_test_error
+        )
+
+    def _run_background_test(
+        self,
+        func: Callable[[TaskContext], Any],
+        name: str,
+        on_finished: Callable[[str, object], None],
+        on_error: Callable[[str, str], None],
+    ) -> None:
+        """在独立单线程 executor 中运行单项测试任务，完成后自动回收线程池。
+
+        WiFi/登录两个测试按钮共用的装配逻辑：连接 finished/error 信号、
+        持有 executor 防 GC、任务结束后从列表移除并关闭。
+        """
         executor = TaskExecutor(max_workers=1)
         self._test_executors.append(executor)
-        executor.finished.connect(self._on_login_test_finished)
-        executor.error.connect(self._on_login_test_error)
+        executor.finished.connect(on_finished)
+        executor.error.connect(on_error)
         executor.finished.connect(lambda *_: self._release_test_executor(executor))
         executor.error.connect(lambda *_: self._release_test_executor(executor))
-        executor.submit(_do_login_test, "test_login")
+        executor.submit(func, name)
 
     def _release_test_executor(self, executor: TaskExecutor) -> None:
         """从测试 executor 列表中移除已完成的 executor 并关闭它。"""
@@ -705,13 +721,12 @@ class MainWindow(QMainWindow):
         """公共退出方法，供 TrayManager 等外部组件调用。"""
         self._real_close()
 
-    def closeEvent(self, event: QCloseEvent | None) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         """关闭事件分流：托盘可用时隐藏驻留，否则走真实退出清理。
 
         真实退出流程：确认有任务运行 → 取消/关闭所有 executor →
         恢复 stdout/stderr → 显式退出事件循环（托盘驻留时必需）。
         """
-        assert event is not None
         # 未点"退出"而只是点窗口关闭按钮：最小化到托盘继续运行
         if not self._force_quit and self._tray.is_available():
             self.hide()

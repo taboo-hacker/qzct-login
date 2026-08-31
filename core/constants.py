@@ -34,8 +34,16 @@ CAMPUS_LOGIN_CONFIG: dict[str, Any] = {
     "version": "7213",
     # 认证页 jsVersion 表单字段
     "js_version": "4.2.2",
-    # 预留的请求超时秒数（实际超时在 campus_login 中用 (3, 10) 分段覆盖）
-    "timeout": 15,
+}
+
+# 运营商类型 → (登录账号后缀, 显示名)。单一数据源：
+# 登录拼接（campus_login）、校验值域（config_validator）、设置页下拉框
+# （settings_panel）均从此派生，新增运营商只需加一行。
+ISP_MAPPING: dict[str, tuple[str, str]] = {
+    "cmcc": ("@cmcc", "移动"),
+    "telecom": ("@telecom", "电信"),
+    "unicom": ("@unicom", "联通"),
+    "local": ("@local", "本地"),
 }
 
 # 登录请求的 HTTP 头：伪装成主流浏览器，避免被网关的 UA 校验拦截
@@ -60,9 +68,13 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 LOG_FILE = os.path.join(CONFIG_DIR, "qzct.log")
 
 # ==========================================
-# 子进程创建标志
+# 子进程调用
 # ==========================================
-# 打包版为 console=False 的 GUI 进程，subprocess 调用控制台程序（netsh/shutdown）
-# 默认会新开控制台窗口、在屏幕上闪黑框；CREATE_NO_WINDOW 抑制之。
+# 子进程创建标志：打包版为 console=False 的 GUI 进程，subprocess 调用控制台程序
+# （netsh/shutdown）默认会新开控制台窗口、在屏幕上闪黑框；CREATE_NO_WINDOW 抑制之。
 # 该标志仅 Windows 存在，其他平台用 0 保持默认行为（跨平台测试可运行）。
 SUBPROCESS_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+# 子进程命令超时（秒）：统一收口，避免魔法数字散落各服务
+NETSH_TIMEOUT_SEC = 15  # netsh 查询/加载 profile/发起连接
+SHUTDOWN_CMD_TIMEOUT_SEC = 10  # shutdown /a 与 shutdown /s 命令

@@ -2,12 +2,21 @@
 日期判断模块
 
 提供基于节假日、调休日、自定义规则和 chinesecalendar 的工作日判断功能。
+
+判定阶梯只实现一次（rule_source），should_work_today 的布尔结果与
+GUI 状态文案（calendar_view）均由它派生，避免两处各自维护优先级导致漂移。
 """
 
 import datetime
+from typing import Any
 
 from core.config import DEFAULT_CONFIG, global_config
 from infra.date_utils import is_date_in_period, parse_date_str
+
+# 判定为"需要执行任务"的来源集合（rule_source 返回值的前一项属于此集合即需执行）
+_WORK_SOURCES = frozenset(
+    {"custom_workday", "custom_weekly_work", "compensatory", "legal_workday", "weekday"}
+)
 
 
 def _chinese_calendar_is_holiday(date: datetime.date) -> bool:
@@ -35,9 +44,9 @@ def _chinese_calendar_is_workday(date: datetime.date) -> bool:
         return False
 
 
-def should_work_today(check_date: datetime.date | None = None) -> bool:
+def rule_source(check_date: datetime.date | None = None) -> tuple[str, dict[str, Any] | None]:
     """
-    判断指定日期是否需要执行自动化任务
+    判定指定日期实际生效的规则来源（唯一的优先级阶梯实现）。
 
     判断优先级：
     1. 自定义规则（用户明确启用时完全遵守用户配置，最高优先级）
@@ -46,10 +55,12 @@ def should_work_today(check_date: datetime.date | None = None) -> bool:
        未来的法定假日兜底）
 
     Args:
-        check_date (datetime.date, optional): 要检查的日期，默认为今天
+        check_date: 要检查的日期，默认为今天
 
     Returns:
-        bool: True表示需要执行任务，False表示不需要执行
+        tuple[str, dict | None]: (来源标识, 命中的区间数据或 None)。来源标识取值：
+        custom_workday / custom_holiday / custom_weekly_work / custom_weekly_rest /
+        compensatory / builtin_holiday / legal_holiday / legal_workday / weekday / weekend
     """
     today = check_date if check_date is not None else datetime.date.today()
     date_rules = global_config.get("DATE_RULES", DEFAULT_CONFIG["DATE_RULES"])
@@ -59,14 +70,16 @@ def should_work_today(check_date: datetime.date | None = None) -> bool:
     if date_rules.get("ENABLE_CUSTOM_RULE", False):
         for period in date_rules.get("CUSTOM_WORKDAY_PERIODS", []):
             if is_date_in_period(today, period):
-                return True
+                return "custom_workday", period
         for period in date_rules.get("CUSTOM_HOLIDAY_PERIODS", []):
             if is_date_in_period(today, period):
-                return False
+                return "custom_holiday", period
 
         weekday = today.weekday()
         weekly_execute_days = date_rules.get("WEEKLY_EXECUTE_DAYS", [0, 1, 2, 3, 4])
-        return weekday in weekly_execute_days
+        return (
+            "custom_weekly_work" if weekday in weekly_execute_days else "custom_weekly_rest"
+        ), None
 
     # 2. 硬编码调休上班日
     compensatory_days = [
@@ -75,20 +88,33 @@ def should_work_today(check_date: datetime.date | None = None) -> bool:
         if (parsed := parse_date_str(d)) is not None
     ]
     if today in compensatory_days:
-        return True
+        return "compensatory", None
 
     # 3. 基础规则分支（使用硬编码节假日 + chinesecalendar 兜底）
     base_holiday_periods = global_config.get("HOLIDAY_PERIODS", [])
     for period in base_holiday_periods:
         if is_date_in_period(today, period):
-            return False
+            return "builtin_holiday", period
 
     # chinesecalendar 法定假日兜底（覆盖硬编码未包含的年份）
     if _chinese_calendar_is_holiday(today):
-        return False
+        return "legal_holiday", None
     # chinesecalendar 调休上班日兜底
     if _chinese_calendar_is_workday(today):
-        return True
+        return "legal_workday", None
 
     weekday = today.weekday()
-    return weekday in [0, 1, 2, 3, 4]
+    return ("weekday" if weekday in [0, 1, 2, 3, 4] else "weekend"), None
+
+
+def should_work_today(check_date: datetime.date | None = None) -> bool:
+    """
+    判断指定日期是否需要执行自动化任务（阶梯实现见 rule_source）
+
+    Args:
+        check_date (datetime.date, optional): 要检查的日期，默认为今天
+
+    Returns:
+        bool: True表示需要执行任务，False表示不需要执行
+    """
+    return rule_source(check_date)[0] in _WORK_SOURCES

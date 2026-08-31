@@ -19,7 +19,8 @@
 """
 
 import sys
-from typing import Any, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from utils.logger import setup_logger
 
@@ -27,8 +28,6 @@ from utils.logger import setup_logger
 # 类型定义
 # ==========================================
 # 项目内部统一用整数级别（0-4），映射到 loguru 的字符串级别
-LogLevel = int
-
 LOG_LEVEL_MAP: dict[int, str] = {
     0: "DEBUG",
     1: "INFO",
@@ -50,7 +49,7 @@ class Logger:
 
     def __init__(
         self,
-        gui_log_widget: Any | None = None,
+        gui_sink: Callable[[str], None] | None = None,
         log_file_path: str | None = None,
         level: int = 1,
         max_log_size: int = 10 * 1024 * 1024,
@@ -60,7 +59,7 @@ class Logger:
         初始化日志器
 
         Args:
-            gui_log_widget: GUI 日志显示组件
+            gui_sink: GUI 日志写入回调（由 gui 层绑定 QtLogSink 后传入）
             log_file_path: 日志文件路径
             level: 日志级别 (0-4)
             max_log_size: 最大日志文件大小（字节）
@@ -77,7 +76,7 @@ class Logger:
         retention_days = backup_count * 7
 
         self._loguru_logger = setup_logger(
-            gui_widget=gui_log_widget,
+            gui_sink=gui_sink,
             log_file=log_file_path,
             level=LOG_LEVEL_MAP.get(level, "INFO"),
             max_size=rotation_str,
@@ -140,7 +139,7 @@ class Logger:
 
 
 def init_logger(
-    gui_log_widget: Any | None = None,
+    gui_sink: Callable[[str], None] | None = None,
     log_file_path: str | None = None,
     level: int = 1,
 ) -> Logger:
@@ -148,7 +147,7 @@ def init_logger(
     初始化全局日志对象
 
     Args:
-        gui_log_widget: GUI 日志显示组件
+        gui_sink: GUI 日志写入回调（由 gui 层绑定 QtLogSink 后传入）
         log_file_path: 日志文件路径
         level: 日志级别 (0-4)
 
@@ -156,7 +155,7 @@ def init_logger(
         初始化后的 Logger 实例
     """
     global logger
-    logger = Logger(gui_log_widget=gui_log_widget, log_file_path=log_file_path, level=level)
+    logger = Logger(gui_sink=gui_sink, log_file_path=log_file_path, level=level)
     return logger
 
 

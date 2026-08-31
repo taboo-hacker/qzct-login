@@ -75,6 +75,12 @@ class QtLogSink(QObject):
         # widget 就绪后 flush 缓冲的日志
         cls.flush_pending_logs()
 
+    @classmethod
+    def instance(cls) -> "QtLogSink":
+        """返回全局单例（须先调用 set_gui_widget 创建）。"""
+        assert cls._instance is not None, "须先调用 QtLogSink.set_gui_widget"
+        return cls._instance
+
     def write(self, message: str) -> None:
         """loguru sink 入口，可在任意线程调用。"""
         if self._gui_widget is not None:

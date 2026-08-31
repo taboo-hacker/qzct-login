@@ -13,6 +13,7 @@
 import copy
 from typing import Any
 
+from core.constants import ISP_MAPPING
 from infra.logging import warning
 
 
@@ -32,7 +33,7 @@ _SCHEMA: dict[str, tuple[type, Any]] = {
     "RETRY_INTERVAL": (int, lambda v: v >= 0),
     "USERNAME": (str, None),
     "PASSWORD": (str, None),
-    "ISP_TYPE": (str, lambda v: v in ("cmcc", "telecom", "unicom", "local")),
+    "ISP_TYPE": (str, lambda v: v in ISP_MAPPING),
     "WAN_IP": (str, None),
     "SHUTDOWN_HOUR": (int, lambda v: 0 <= v <= 23),
     "SHUTDOWN_MIN": (int, lambda v: 0 <= v <= 59),

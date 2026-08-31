@@ -1,13 +1,13 @@
 """
 utils/logger.py 补充测试
 
-覆盖 setup_logger 的各类 sink 组合（stderr / 文件 / GUI 控件）
-以及 get_logger、set_gui_widget（QtLogSink 单例绑定）功能。
+覆盖 setup_logger 的各类 sink 组合（stderr / 文件 / GUI 回调）。
 日志文件相关用例使用 pytest 的 tmp_path 隔离磁盘写入。
 """
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from loguru import logger
@@ -18,18 +18,19 @@ class TestSetupLogger:
     """setup_logger 测试：按 sink 类型（stderr/文件/GUI）分组验证配置行为。"""
 
     def test_returns_logger(self) -> None:
-        """setup_logger 正常执行并返回 logger 实例。"""
+        """setup_logger 正常执行并返回 loguru logger 实例。"""
         from utils.logger import setup_logger
 
         result = setup_logger(level="DEBUG")
-        assert result is not None
+        assert result is logger
 
     def test_adds_stderr_handler(self) -> None:
-        """默认配置应成功添加 stderr sink（不崩溃即通过）。"""
-        from utils.logger import setup_logger
+        """默认配置应添加 stderr sink（打桩 logger.add 计数验证）。"""
+        import utils.logger as ul
 
-        setup_logger()
-        # 验证没有崩溃即可——stderr handler 已添加
+        with patch.object(ul.logger, "add") as mock_add:
+            ul.setup_logger()
+        mock_add.assert_called_once()  # 仅 stderr 一个 sink
 
     def test_skips_stderr_sink_when_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -41,17 +42,17 @@ class TestSetupLogger:
         monkeypatch.setattr("sys.stderr", None)
         log_file = str(tmp_path / "qzct.log")
         result = setup_logger(log_file=log_file, level="INFO")
-        assert result is not None
+        assert result is logger
 
     def test_adds_file_handler(self, tmp_path: Path) -> None:
-        """指定 log_file 时应添加文件 sink，写入日志后文件存在。"""
+        """指定 log_file 时应添加文件 sink，写入日志后文件存在且有内容。"""
         from utils.logger import setup_logger
 
         log_file = str(tmp_path / "test.log")
         setup_logger(log_file=log_file, level="INFO")
         logger.info("test message")
-        # 验证日志文件被创建
-        assert os.path.exists(log_file)
+        content = Path(log_file).read_text(encoding="utf-8")
+        assert "test message" in content
 
     def test_creates_log_directory(self, tmp_path: Path) -> None:
         """log_file 所在目录不存在时应自动创建多级目录。"""
@@ -61,46 +62,22 @@ class TestSetupLogger:
         log_file = str(log_dir / "test.log")
         setup_logger(log_file=log_file, level="INFO")
         assert log_dir.exists()
+        assert os.path.exists(log_file)
 
-    def test_gui_widget_adds_handler(self, qtbot: QtBot) -> None:
-        """传入 gui_widget 时应成功挂载 QtLogSink handler（不崩溃）。"""
-        from PySide6.QtWidgets import QTextEdit
-
+    def test_gui_sink_receives_log(self, qtbot: QtBot) -> None:
+        """传入 gui_sink 回调时应挂载对应 sink，日志经回调送达。"""
         from utils.logger import setup_logger
 
-        widget = QTextEdit()
-        qtbot.addWidget(widget)
-        result = setup_logger(gui_widget=widget)
-        assert result is not None
+        received: list[str] = []
+        setup_logger(gui_sink=received.append, level="INFO")
+        logger.info("hello gui sink")
+        assert any("hello gui sink" in line for line in received)
 
+    def test_gui_sink_none_not_mounted(self) -> None:
+        """gui_sink 为 None 时不应挂载 GUI sink（回调列表为空）。"""
+        from utils.logger import setup_logger
 
-class TestGetLogger:
-    """get_logger 测试。"""
-
-    def test_returns_logger_instance(self) -> None:
-        """get_logger 应返回非 None 的 logger 实例。"""
-        from utils.logger import get_logger
-
-        result = get_logger()
-        assert result is not None
-
-
-class TestSetGuiWidget:
-    """set_gui_widget 测试：验证 GUI 日志控件与 QtLogSink 单例的绑定。"""
-
-    def test_sets_widget(self, qtbot: QtBot) -> None:
-        """设置 widget 后 QtLogSink 单例应被创建并持有该控件引用。"""
-        from PySide6.QtWidgets import QTextEdit
-
-        from gui.log_sink import QtLogSink
-        from utils.logger import set_gui_widget
-
-        # QtLogSink 为单例，先重置类属性，避免受其他测试执行顺序影响
-        QtLogSink._instance = None
-        QtLogSink._pending_logs = []
-
-        widget = QTextEdit()
-        qtbot.addWidget(widget)
-        set_gui_widget(widget)
-        assert QtLogSink._instance is not None
-        assert QtLogSink._instance.gui_widget is widget
+        received: list[str] = []
+        setup_logger(gui_sink=None, level="INFO")
+        logger.info("no gui sink")
+        assert received == []

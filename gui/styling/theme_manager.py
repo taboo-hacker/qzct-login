@@ -7,8 +7,6 @@
 
 from typing import Optional
 
-from PySide6.QtWidgets import QWidget
-
 from gui.styling.themes import BUILTIN_THEMES, ThemeColors
 
 
@@ -93,19 +91,3 @@ class ThemeManager:
         if cls._instance is None:
             cls._instance = cls()
         cls._instance._custom_themes[name] = colors
-
-    @classmethod
-    def apply_to_widget(
-        cls,
-        widget: QWidget,  # noqa: ARG003  # 兼容旧调用方保留，见 docstring
-        theme_name: str | None = None,
-    ) -> None:
-        """应用主题：指定名称则切换主题，否则按当前主题重刷全局 QSS。
-
-        实际重绘由 QApplication.setStyleSheet 完成，widget 参数仅为
-        兼容旧调用方保留。
-        """
-        if theme_name:
-            cls.set_theme(theme_name)
-        else:
-            cls._apply_qss()

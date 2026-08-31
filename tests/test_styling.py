@@ -6,7 +6,7 @@ create_card_widget/create_tip_label）、LogTextEdit 彩色日志控件、
 ThemeManager 主题切换/注册，以及 build_qss 全局样式表的生成。
 """
 
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from gui.styling.theme_manager import ThemeManager
@@ -221,21 +221,6 @@ class TestThemeManagerExtended:
         ThemeManager._current_theme_name = "nonexistent"
         result = ThemeManager.current_theme()
         assert isinstance(result, ThemeColors)
-
-    def test_apply_to_widget_sets_theme(self) -> None:
-        """apply_to_widget 指定主题名时应先切换全局主题再应用样式。"""
-        _ensure_qapp()
-        widget = QLabel()
-        ThemeManager.apply_to_widget(widget, "dark")
-        assert ThemeManager.current_theme_name() == "dark"
-        ThemeManager.set_theme("light")
-
-    def test_apply_to_widget_no_theme_name(self) -> None:
-        """不传主题名时应使用当前主题应用样式（不崩溃即可）。"""
-        _ensure_qapp()
-        widget = QLabel()
-        ThemeManager.apply_to_widget(widget)
-        # 不崩溃即可
 
 
 class TestBuildQss:

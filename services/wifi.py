@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from core.config import get_config_snapshot
-from core.constants import CONFIG_DIR, SUBPROCESS_NO_WINDOW
+from core.constants import CONFIG_DIR, NETSH_TIMEOUT_SEC, SUBPROCESS_NO_WINDOW
 from core.exceptions import WiFiConnectionError, WiFiProfileError
 from infra.logging import error, info
 
@@ -21,8 +21,10 @@ from infra.logging import error, info
 CancelCheck = Callable[[], bool] | None
 
 
-def _interruptible_sleep(seconds: float, should_cancel: CancelCheck = None) -> bool:
+def interruptible_sleep(seconds: float, should_cancel: CancelCheck = None) -> bool:
     """可中断的睡眠：分片 sleep 并轮询取消标志。
+
+    公开供 GUI 的单项测试等场景复用（后台任务的标准睡眠实现）。
 
     Args:
         seconds: 总睡眠时长（秒）
@@ -59,7 +61,7 @@ def is_wifi_connected(wifi_name: str) -> bool:
             ["netsh", "wlan", "show", "interfaces"],
             encoding="gbk",
             errors="ignore",
-            timeout=15,
+            timeout=NETSH_TIMEOUT_SEC,
             creationflags=SUBPROCESS_NO_WINDOW,
         )
         # 精确匹配 SSID，避免子串误判（如 "WiFi" 误匹配 "WiFi-5G"）
@@ -137,7 +139,7 @@ def _wifi_profile_exists(wifi_name: str) -> bool:
             ["netsh", "wlan", "show", "profile"],
             encoding="gbk",
             errors="ignore",
-            timeout=15,
+            timeout=NETSH_TIMEOUT_SEC,
             creationflags=SUBPROCESS_NO_WINDOW,
         )
         # 精确匹配 profile 名称，避免子串误判
@@ -176,7 +178,7 @@ def _do_connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck =
                     ["netsh", "wlan", "add", "profile", f"filename={tmp_path}", "user=all"],
                     check=True,
                     capture_output=True,
-                    timeout=15,
+                    timeout=NETSH_TIMEOUT_SEC,
                     creationflags=SUBPROCESS_NO_WINDOW,
                 )
             except subprocess.CalledProcessError as e:
@@ -192,21 +194,18 @@ def _do_connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck =
                     error("services.wifi", f"清理临时文件失败：{e}")
 
     info("services.wifi", f"发起WiFi连接请求：{wifi_name}")
-    try:
-        subprocess.run(
-            ["netsh", "wlan", "connect", "name=" + wifi_name],
-            check=False,
-            capture_output=True,
-            timeout=15,
-            creationflags=SUBPROCESS_NO_WINDOW,
-        )
-    except subprocess.CalledProcessError as e:
-        # netsh wlan connect 的 exit code 不可靠，连接正在建立时也可能返回 1
-        # 不直接抛异常，继续走下面的连接验证
-        info("services.wifi", f"netsh connect 返回非零退出码（可忽略）：{e.returncode}")
+    # netsh wlan connect 的 exit code 不可靠（连接正在建立时也可能返回 1），
+    # check=False 执行即可，成败由随后的连接验证判定
+    subprocess.run(
+        ["netsh", "wlan", "connect", "name=" + wifi_name],
+        check=False,
+        capture_output=True,
+        timeout=NETSH_TIMEOUT_SEC,
+        creationflags=SUBPROCESS_NO_WINDOW,
+    )
 
     info("services.wifi", "等待WiFi连接稳定...")
-    if not _interruptible_sleep(5, should_cancel):
+    if not interruptible_sleep(5, should_cancel):
         raise WiFiConnectionError(f"WiFi 连接已取消：{wifi_name}")
 
     if not is_wifi_connected(wifi_name):
@@ -297,7 +296,7 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None, should_cancel: CancelCh
             # 指数退避：1s → 2s → 4s → 8s → ... 上限 60s
             delay = min(retry_interval * (2 ** (retry_count - 1)), 60)
             info("services.wifi", f"等待{delay}秒后重试...")
-            if not _interruptible_sleep(delay, should_cancel):
+            if not interruptible_sleep(delay, should_cancel):
                 info("services.wifi", "WiFi 自动连接已取消", exc_info=False)
                 return False
 

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from core.config import DEFAULT_CONFIG, global_config
 from core.config import save_config as save_config_to_disk
+from core.constants import ISP_MAPPING
 from gui.styling.constants import FontSize
 from gui.styling.theme_manager import ThemeManager
 from gui.styling.widgets import (
@@ -207,13 +208,17 @@ class SettingsPanel(QWidget):
         login_layout.addRow("密码：", login_pwd_layout)
 
         self.isp_combo = QComboBox()
-        # 顺序与 ISP_MAPPING（core/config.py）一致；local 对应账号后缀 @local
-        self.isp_combo.addItems(["移动", "电信", "联通", "本地"])
+        # 运营商下拉框由 ISP_MAPPING（core/constants.py）单一数据源派生，
+        # userData 存 ISP_TYPE 键，新增运营商无需改本文件
+        for isp_key, (_, display_name) in ISP_MAPPING.items():
+            self.isp_combo.addItem(display_name, isp_key)
         self.isp_combo.setMinimumHeight(30)
-        isp_mapping = {"cmcc": 0, "telecom": 1, "unicom": 2, "local": 3}
-        self.isp_combo.setCurrentIndex(
-            isp_mapping.get(global_config.get("ISP_TYPE", DEFAULT_CONFIG["ISP_TYPE"]), 1)
+        isp_keys = list(ISP_MAPPING.keys())
+        current_isp = str(global_config.get("ISP_TYPE", DEFAULT_CONFIG["ISP_TYPE"]))
+        index = (
+            isp_keys.index(current_isp) if current_isp in isp_keys else isp_keys.index("telecom")
         )
+        self.isp_combo.setCurrentIndex(index)
         login_layout.addRow("运营商类型：", self.isp_combo)
 
         self.wan_ip_edit = QLineEdit()
@@ -350,6 +355,17 @@ class SettingsPanel(QWidget):
 
         return _handler
 
+    def _read_int(self, edit: QLineEdit, lo: int, hi: int, err_msg: str) -> int | None:
+        """读取并校验整数输入：不合法（非整数/越界）时弹警告并返回 None。"""
+        try:
+            val = int(edit.text())
+            if not (lo <= val <= hi):
+                raise ValueError
+            return val
+        except ValueError:
+            QMessageBox.warning(self, "提示", err_msg)
+            return None
+
     def save_config(self) -> None:
         """保存配置——先收集到临时 dict，全部验证通过后统一写入 global_config"""
         # _init_ui 保证以下控件已初始化
@@ -375,51 +391,41 @@ class SettingsPanel(QWidget):
         pending["WIFI_NAME"] = self.wifi_name_edit.text()
         pending["WIFI_PASSWORD"] = self.wifi_password_edit.text()
 
-        try:
-            val = int(self.wifi_retry_edit.text())
-            if val < 0:
-                raise ValueError
-            pending["MAX_WIFI_RETRY"] = val
-        except ValueError:
-            QMessageBox.warning(self, "提示", "最大重试次数请输入非负整数")
+        max_retry = self._read_int(self.wifi_retry_edit, 0, 10_000, "最大重试次数请输入非负整数")
+        if max_retry is None:
             return
+        pending["MAX_WIFI_RETRY"] = max_retry
 
-        try:
-            val = int(self.retry_interval_edit.text())
-            if val < 1:
-                raise ValueError
-            pending["RETRY_INTERVAL"] = val
-        except ValueError:
-            QMessageBox.warning(self, "提示", "重试间隔请输入大于 0 的整数")
+        retry_interval = self._read_int(
+            self.retry_interval_edit, 1, 86_400, "重试间隔请输入大于 0 的整数"
+        )
+        if retry_interval is None:
             return
+        pending["RETRY_INTERVAL"] = retry_interval
 
         # 校园网登录配置
         pending["USERNAME"] = self.username_edit.text()
         pending["PASSWORD"] = self.password_edit.text()
 
-        isp_mapping = {0: "cmcc", 1: "telecom", 2: "unicom", 3: "local"}
-        pending["ISP_TYPE"] = isp_mapping[self.isp_combo.currentIndex()]
+        isp_key = self.isp_combo.currentData()
+        pending["ISP_TYPE"] = isp_key if isp_key in ISP_MAPPING else "telecom"
 
         pending["WAN_IP"] = self.wan_ip_edit.text()
 
         # 自动关机配置
-        try:
-            val = int(self.shutdown_hour_edit.text())
-            if not (0 <= val <= 23):
-                raise ValueError
-            pending["SHUTDOWN_HOUR"] = val
-        except ValueError:
-            QMessageBox.warning(self, "提示", "关机小时请输入 0~23 之间的整数")
+        shutdown_hour = self._read_int(
+            self.shutdown_hour_edit, 0, 23, "关机小时请输入 0~23 之间的整数"
+        )
+        if shutdown_hour is None:
             return
+        pending["SHUTDOWN_HOUR"] = shutdown_hour
 
-        try:
-            val = int(self.shutdown_min_edit.text())
-            if not (0 <= val <= 59):
-                raise ValueError
-            pending["SHUTDOWN_MIN"] = val
-        except ValueError:
-            QMessageBox.warning(self, "提示", "关机分钟请输入 0~59 之间的整数")
+        shutdown_min = self._read_int(
+            self.shutdown_min_edit, 0, 59, "关机分钟请输入 0~59 之间的整数"
+        )
+        if shutdown_min is None:
             return
+        pending["SHUTDOWN_MIN"] = shutdown_min
 
         # 日期规则 / 调休上班日 / 基础节假日：子组件只返回待保存数据，
         # 与表单字段一样先进 pending，验证通过后统一写入（保存事务性）

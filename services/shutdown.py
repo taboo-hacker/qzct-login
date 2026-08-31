@@ -13,7 +13,7 @@
 
 import subprocess
 
-from core.constants import SUBPROCESS_NO_WINDOW
+from core.constants import SHUTDOWN_CMD_TIMEOUT_SEC, SUBPROCESS_NO_WINDOW
 from infra.logging import error, info
 
 
@@ -31,20 +31,20 @@ def cancel_shutdown() -> bool:
         result = subprocess.run(
             ["shutdown", "/a"],
             capture_output=True,
-            timeout=10,
+            timeout=SHUTDOWN_CMD_TIMEOUT_SEC,
             creationflags=SUBPROCESS_NO_WINDOW,
         )
     except (subprocess.SubprocessError, OSError) as e:
-        error("business", f"取消关机任务异常: {e}")
+        error("services.shutdown", f"取消关机任务异常: {e}")
         return False
     # returncode 1119 表示没有待取消的关机任务，不算错误
     if result.returncode != 0 and result.returncode != 1119:
         error(
-            "business",
+            "services.shutdown",
             f"取消关机任务失败 (returncode={result.returncode}): {result.stderr.decode(errors='ignore')}",
         )
         return False
-    info("business", "已尝试取消之前的关机任务（如果有）")
+    info("services.shutdown", "已尝试取消之前的关机任务（如果有）")
     return True
 
 
@@ -66,17 +66,17 @@ def set_shutdown_timer(seconds: int) -> bool:
         result = subprocess.run(
             ["shutdown", "/s", "/t", str(seconds)],
             capture_output=True,
-            timeout=10,
+            timeout=SHUTDOWN_CMD_TIMEOUT_SEC,
             creationflags=SUBPROCESS_NO_WINDOW,
         )
     except (subprocess.SubprocessError, OSError) as e:
-        error("business", f"设置关机任务异常: {e}")
+        error("services.shutdown", f"设置关机任务异常: {e}")
         return False
     if result.returncode != 0:
         error(
-            "business",
+            "services.shutdown",
             f"设置关机任务失败 (returncode={result.returncode}): {result.stderr.decode(errors='ignore')}",
         )
         return False
-    info("business", f"已设置在 {seconds} 秒后自动关机")
+    info("services.shutdown", f"已设置在 {seconds} 秒后自动关机")
     return True

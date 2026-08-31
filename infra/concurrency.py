@@ -16,7 +16,7 @@
 取消模型（协作式）：
     cancel_all() 只是置位 TaskContext 的取消标志，不能强杀线程。
     任务函数需在长循环 / 长睡眠中主动检查 ctx.is_cancelled() 并尽快返回
-    （services/wifi.py 的 _interruptible_sleep 是标准实现参考）。
+    （services/wifi.py 的 interruptible_sleep 是标准实现）。
 
 典型用法见 services/tasks.py 与 gui/main_window.py 的 start_task_chain()。
 """
@@ -314,11 +314,6 @@ class TaskExecutor(QObject):
         self._finish_chain(False)
 
 
-# 全局任务注册表：@task 装饰器注册的包装函数按名称索引，
-# 便于按名字查找任务（当前主要供测试与调试使用）
-_task_registry: dict[str, Callable[..., Any]] = {}
-
-
 def task(name: str, timeout: float | None = None) -> Callable[..., Any]:
     """任务函数装饰器 —— 统一命名、耗时统计、可选超时。
 
@@ -364,7 +359,6 @@ def task(name: str, timeout: float | None = None) -> Callable[..., Any]:
         # 属性供 TaskExecutor.submit / TaskChain.add 识别任务名与超时
         wrapper.task_name = name  # type: ignore[attr-defined]
         wrapper.timeout = timeout  # type: ignore[attr-defined]
-        _task_registry[name] = wrapper
         return wrapper
 
     return decorator

@@ -23,10 +23,10 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import global_config
-from core.date_rules import should_work_today
+from core.date_rules import rule_source, should_work_today
 from gui.styling.theme_manager import ThemeManager
 from gui.styling.widgets import create_card_widget, create_label
-from infra import debug, error, info, is_date_in_period, parse_date_str, warning
+from infra import debug, error, info, warning
 
 # 星期名称常量（模块级，避免每次调用重新创建）
 WEEKDAY_NAMES = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
@@ -403,60 +403,38 @@ class CalendarView(QWidget):
                 "other_info": "",
             }
 
-    @staticmethod
-    def _find_period(periods: list[dict[str, Any]], date: datetime.date) -> dict[str, Any] | None:
-        """返回第一个包含指定日期的区间，均不包含时返回 None。"""
-        for period in periods:
-            if is_date_in_period(date, period):
-                return period
-        return None
+    # 来源标识 → 状态文案前缀（与 core.date_rules.rule_source 的返回值对应；
+    # 法定假日/周末等无名称来源不加前缀，保持简洁）
+    _SOURCE_TEXT = {
+        "custom_workday": "自定义工作日",
+        "custom_holiday": "自定义假期",
+        "custom_weekly_work": "自定义每周执行日",
+        "custom_weekly_rest": "自定义每周休息日",
+        "compensatory": "调休上班日",
+        "builtin_holiday": "节假日",
+    }
 
     def should_work_on_date(self, date: datetime.date) -> tuple[bool, str]:
         """判断指定日期是否需要执行任务，并给出状态文案。
 
-        判定结果 (bool) 委托 core.date_rules.should_work_today；
-        状态文案按与判定核心相同的优先级拼装（自定义规则 > 调休 > 内置节假日），
-        避免出现"文案说调休上班、实际按自定义规则判定"的误导。
+        布尔判定与来源均委托 core.date_rules.rule_source（唯一优先级阶梯），
+        本方法只负责把来源翻译成用户可读文案，避免两处阶梯实现漂移。
         """
         try:
             result = should_work_today(date)
+            source, period = rule_source(date)
             debug(
                 "main",
-                f"检查日期 {date} 是否需要执行任务: {'是' if result else '否'}",
+                f"检查日期 {date} 是否需要执行任务: {'是' if result else '否'}（来源 {source}）",
             )
 
-            status = "不执行任务"
-            if result:
-                status = "需要执行任务"
-
-            date_rules = global_config.get("DATE_RULES", {})
-            if date_rules.get("ENABLE_CUSTOM_RULE", False):
-                # 自定义规则模式：调休/内置节假日不参与判定，文案只反映自定义来源
-                period = self._find_period(date_rules.get("CUSTOM_WORKDAY_PERIODS", []), date)
-                if period is not None:
-                    status = f"自定义工作日({period.get('name') or '未命名'}) - 需要执行任务"
-                else:
-                    period = self._find_period(date_rules.get("CUSTOM_HOLIDAY_PERIODS", []), date)
-                    if period is not None:
-                        status = f"自定义假期({period.get('name') or '未命名'}) - 不执行任务"
-                    else:
-                        weekly_days = date_rules.get("WEEKLY_EXECUTE_DAYS", [0, 1, 2, 3, 4])
-                        if date.weekday() in weekly_days:
-                            status = "自定义每周执行日 - 需要执行任务"
-                        else:
-                            status = "自定义每周休息日 - 不执行任务"
+            prefix = self._SOURCE_TEXT.get(source)
+            if prefix is None:
+                status = "需要执行任务" if result else "不执行任务"
             else:
-                compensatory_days = [
-                    parsed
-                    for d in global_config.get("COMPENSATORY_WORKDAYS", [])
-                    if (parsed := parse_date_str(d)) is not None
-                ]
-                if date in compensatory_days:
-                    status = "调休上班日 - 需要执行任务"
-                else:
-                    period = self._find_period(global_config.get("HOLIDAY_PERIODS", []), date)
-                    if period is not None and not result:
-                        status = f"节假日({period.get('name') or '未命名'}) - 不执行任务"
+                name = period.get("name") if period else None
+                label = f"{prefix}({name})" if name else prefix
+                status = f"{label} - {'需要执行任务' if result else '不执行任务'}"
 
             return (result, status)
         except Exception as e:

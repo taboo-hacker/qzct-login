@@ -16,7 +16,7 @@ import threading
 from typing import Any
 
 from core.config_validator import validate_config
-from core.constants import CONFIG_DIR, CONFIG_FILE
+from core.constants import CONFIG_DIR, CONFIG_FILE, ISP_MAPPING
 from core.holidays import COMPENSATORY_WORKDAYS, HOLIDAY_PERIODS
 from infra.file_permissions import restrict_file_permissions
 from infra.logging import error, info, warning
@@ -89,8 +89,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
 }
 
-# 运营商类型 → 登录账号后缀映射（campus_login 拼接 user_account 时使用）
-ISP_MAPPING = {"cmcc": "@cmcc", "telecom": "@telecom", "unicom": "@unicom", "local": "@local"}
+# 运营商类型 → (登录账号后缀, 显示名) 的单一数据源在 core/constants.py 的
+# ISP_MAPPING，此处与 core/__init__.py 仅再导出，供旧调用方稳定引用。
 
 # Python weekday() 数字（0=周一）→ 中文名（UI 显示用）
 WEEKDAY_MAPPING = {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五", 5: "周六", 6: "周日"}
@@ -213,7 +213,7 @@ def load_config() -> str | None:
             if "ISP_SUFFIX" in loaded_config:
                 suffix = loaded_config["ISP_SUFFIX"]
                 migrated = False
-                for type_key, type_suffix in ISP_MAPPING.items():
+                for type_key, (type_suffix, _) in ISP_MAPPING.items():
                     if type_suffix == suffix:
                         new_config["ISP_TYPE"] = type_key
                         migrated = True

@@ -180,8 +180,15 @@ class TestISPMapping:
         assert "local" in ISP_MAPPING
 
     def test_isp_mapping_values(self) -> None:
-        """每个 ISP 键应映射到对应的登录账号后缀字符串。"""
-        assert ISP_MAPPING["cmcc"] == "@cmcc"
-        assert ISP_MAPPING["telecom"] == "@telecom"
-        assert ISP_MAPPING["unicom"] == "@unicom"
-        assert ISP_MAPPING["local"] == "@local"
+        """每个 ISP 键应映射到 (登录账号后缀, 显示名) 二元组。"""
+        assert ISP_MAPPING["cmcc"] == ("@cmcc", "移动")
+        assert ISP_MAPPING["telecom"] == ("@telecom", "电信")
+        assert ISP_MAPPING["unicom"] == ("@unicom", "联通")
+        assert ISP_MAPPING["local"] == ("@local", "本地")
+
+    def test_isp_mapping_single_source(self) -> None:
+        """单一数据源：校验值域应与 ISP_MAPPING 派生一致。"""
+        from core.constants import ISP_MAPPING as SOURCE
+
+        assert set(ISP_MAPPING) == set(SOURCE)
+        assert all(isinstance(v, tuple) and len(v) == 2 for v in ISP_MAPPING.values())

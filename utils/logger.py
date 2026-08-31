@@ -1,17 +1,19 @@
 """
 Loguru 日志系统配置
 
-提供日志器初始化和配置。QtLogSink 已移至 gui/log_sink.py，
-本模块通过延迟导入使用，使 utils/ 层不再在模块加载时耦合 PySide6。
+提供日志器初始化和配置。本模块不依赖 PySide6：GUI 日志投递由调用方
+（gui 层）传入可写回调（gui/log_sink.py 的 QtLogSink.write），
+依赖方向保持 utils ← gui，不形成包级循环。
 
 三个 sink（按配置启用）：
-    GUI   → gui/log_sink.py 的 QtLogSink（跨线程 Signal 投递到主线程）
+    GUI   → gui_sink 回调（QtLogSink，跨线程 Signal 投递到主线程）
     文件  → log_file 参数指定的路径（轮转 + zip 压缩 + 保留期清理）
     终端  → sys.stderr 彩色输出（打包 console=False 模式下自动跳过）
 """
 
 import os
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from loguru import logger
@@ -20,7 +22,7 @@ from infra.file_permissions import restrict_file_permissions
 
 
 def setup_logger(
-    gui_widget: Any = None,
+    gui_sink: Callable[[str], None] | None = None,
     log_file: str | None = None,
     level: str = "INFO",
     max_size: str = "10 MB",
@@ -30,7 +32,8 @@ def setup_logger(
     配置 Loguru 日志系统
 
     Args:
-        gui_widget: PyQt QTextEdit 组件，用于显示日志
+        gui_sink: GUI 日志写入回调（接收格式化后的整行消息），
+            由调用方绑定具体控件实现，None 表示不启用 GUI sink
         log_file: 日志文件路径
         level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         max_size: 日志文件最大大小，默认 10 MB（超过后轮转）
@@ -53,12 +56,9 @@ def setup_logger(
         "{message}"
     )
 
-    if gui_widget:
-        from gui.log_sink import QtLogSink
-
-        QtLogSink.set_gui_widget(gui_widget)
+    if gui_sink is not None:
         logger.add(
-            QtLogSink._instance.write,  # type: ignore[union-attr]
+            gui_sink,
             level=level,
             format=plain_format + "\n",
             colorize=False,
@@ -91,18 +91,4 @@ def setup_logger(
         logger.add(sys.stderr, level=level, format=terminal_format, colorize=True)
 
     logger.info("日志系统初始化完成 [Loguru]")
-    return logger
-
-
-def set_gui_widget(widget: Any) -> None:
-    """运行时更新 GUI 日志组件"""
-    from gui.log_sink import QtLogSink
-
-    QtLogSink.set_gui_widget(widget)
-    if QtLogSink._instance and QtLogSink._pending_logs:
-        QtLogSink.flush_pending_logs()
-
-
-def get_logger() -> Any:
-    """获取 Loguru logger 实例"""
     return logger
