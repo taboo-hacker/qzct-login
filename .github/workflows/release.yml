@@ -14,17 +14,19 @@ jobs:
   pre-release-check:
     name: 发布前检查
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: 设置 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
       - name: 缓存 pip
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-release-${{ hashFiles('pyproject.toml') }}
@@ -52,15 +54,15 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: 设置 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
       - name: 缓存 pip
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~\AppData\Local\pip\Cache
           key: ${{ runner.os }}-pip-exe-${{ hashFiles('pyproject.toml') }}
@@ -75,7 +77,7 @@ jobs:
         run: python build.py --clean --verify
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: qzct-login-windows
           path: |
@@ -85,7 +87,7 @@ jobs:
 
       - name: 上传到 GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@f3cad8bcbf209fe591aa1823e372c5d96b7fc800 # v2.3.1
         with:
           files: |
             dist/qzct-login.exe
@@ -110,10 +112,10 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: 设置 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -139,6 +141,6 @@ jobs:
 
       - name: 上传 Wheel 到 Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@f3cad8bcbf209fe591aa1823e372c5d96b7fc800 # v2.3.1
         with:
           files: dist/*.whl
