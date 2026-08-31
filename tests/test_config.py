@@ -49,7 +49,10 @@ class TestSaveConfig:
             }
         )
 
-        assert save_config() is True
+        # 收权（icacls/chmod）是尽力而为的加固，测试中打桩避免真实调用系统命令
+        with patch("core.config.restrict_file_permissions") as mock_restrict:
+            assert save_config() is True
+        mock_restrict.assert_called_once()
 
         saved = json.loads((temp_config_dir / "config.json").read_text(encoding="utf-8"))
         assert saved["WIFI_PASSWORD"] == "wifi_secret"

@@ -16,29 +16,7 @@ from typing import Any
 
 from loguru import logger
 
-
-def _restrict_file_permissions(filepath: str) -> None:
-    """限制文件权限，使其仅当前用户可读写（Windows: icacls，POSIX: chmod 600）。
-
-    失败不阻断日志初始化。
-    """
-    try:
-        if sys.platform == "win32":
-            import getpass
-            import subprocess
-
-            subprocess.run(
-                ["icacls", filepath, "/inheritance:r", "/grant:r", f"{getpass.getuser()}:F"],
-                capture_output=True,
-                timeout=10,
-                check=False,
-                # GUI 进程调用控制台程序避免闪黑框（分支内已确保 Windows）
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            os.chmod(filepath, 0o600)
-    except Exception:
-        pass
+from infra.file_permissions import restrict_file_permissions
 
 
 def setup_logger(
@@ -95,7 +73,7 @@ def setup_logger(
         if not os.path.exists(log_file):
             with open(log_file, "a", encoding="utf-8"):
                 pass
-        _restrict_file_permissions(log_file)
+        restrict_file_permissions(log_file)
 
         logger.add(
             log_file,

@@ -18,6 +18,7 @@ from typing import Any
 from core.config_validator import validate_config
 from core.constants import CONFIG_DIR, CONFIG_FILE
 from core.holidays import COMPENSATORY_WORKDAYS, HOLIDAY_PERIODS
+from infra.file_permissions import restrict_file_permissions
 from infra.logging import error, info, warning
 
 # ==========================================
@@ -284,6 +285,8 @@ def save_config() -> bool:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_file, CONFIG_FILE)
+        # config.json 含账号/WiFi 密码明文，落盘后立即收紧到仅当前用户可读写
+        restrict_file_permissions(CONFIG_FILE)
         info("system_core", f"配置已保存到 {CONFIG_FILE}")
         return True
     except Exception as e:

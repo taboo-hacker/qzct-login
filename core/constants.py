@@ -22,7 +22,9 @@ from typing import Any
 # 值类型混合（str 协议参数 + int 预留超时），注解 dict[str, Any]
 # 供消费方按需 narrow（campus_login 取 str 字段）。
 CAMPUS_LOGIN_CONFIG: dict[str, Any] = {
-    # 认证接口地址：192.168.51.2 为校园网认证网关，801 端口为 ePortal 服务
+    # 认证接口地址：192.168.51.2 为校园网认证网关，801 端口为 ePortal 服务。
+    # 注意：当前为 http 明文协议（由网关决定），账号密码可被同网段截获；
+    # 若网关启用 https，请勿关闭证书校验，改用 verify=<网关证书路径> 做证书固定。
     "login_url": "http://192.168.51.2:801/eportal/portal/login",
     # 请求 Referer 头，需与认证页同源，否则部分网关会拒绝
     "referer": "http://192.168.51.2/",

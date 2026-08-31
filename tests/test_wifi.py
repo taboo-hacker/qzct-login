@@ -8,7 +8,7 @@ _do_connect_wifi（含临时 profile 文件的创建/清理与异常路径）、
 """
 
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -113,10 +113,9 @@ class TestDoConnectWifi:
             patch("services.wifi.subprocess.run") as mock_run,
             patch("services.wifi.time.sleep"),
             patch("services.wifi.is_wifi_connected", return_value=True),
-            patch("services.wifi.os.close"),
             patch("services.wifi.os.unlink"),
             patch("services.wifi.os.path.exists", return_value=True),
-            patch("builtins.open", new_callable=MagicMock),
+            patch("services.wifi.os.fdopen"),
             # mkstemp 打桩到固定的 /tmp/test.xml，避免真实磁盘写入
             patch("services.wifi.tempfile.mkstemp", return_value=(123, "/tmp/test.xml")),
         ):
@@ -129,10 +128,9 @@ class TestDoConnectWifi:
         with (
             patch("services.wifi._wifi_profile_exists", return_value=False),
             patch("services.wifi.subprocess.run") as mock_run,
-            patch("services.wifi.os.close"),
             patch("services.wifi.os.unlink"),
             patch("services.wifi.os.path.exists", return_value=True),
-            patch("builtins.open", new_callable=MagicMock),
+            patch("services.wifi.os.fdopen"),
             patch("services.wifi.tempfile.mkstemp", return_value=(123, "/tmp/test.xml")),
         ):
             mock_run.side_effect = subprocess.CalledProcessError(1, "netsh")
@@ -155,10 +153,9 @@ class TestDoConnectWifi:
         with (
             patch("services.wifi._wifi_profile_exists", return_value=False),
             patch("services.wifi.subprocess.run") as mock_run,
-            patch("services.wifi.os.close"),
             patch("services.wifi.os.unlink") as mock_unlink,
             patch("services.wifi.os.path.exists", return_value=True),
-            patch("builtins.open", new_callable=MagicMock),
+            patch("services.wifi.os.fdopen"),
             patch("services.wifi.tempfile.mkstemp", return_value=(123, "/tmp/test.xml")),
         ):
             mock_run.side_effect = subprocess.CalledProcessError(1, "netsh")

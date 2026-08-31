@@ -165,10 +165,9 @@ def _do_connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck =
         os.makedirs(CONFIG_DIR, exist_ok=True)
         # 使用 tempfile 生成不可预测的临时文件路径，避免密码文件被猜测路径访问
         fd, tmp_path = tempfile.mkstemp(suffix=".xml", prefix=".wifi_profile_", dir=CONFIG_DIR)
-        # Windows 上 mkstemp 返回的 fd 需要关闭后再写
-        os.close(fd)
         try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            # 直接经 mkstemp 返回的 fd 写入：不 close 再重开，消除路径被抢占的竞态窗口
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(create_windows_wifi_profile(wifi_name, password))
             info("services.wifi", "创建临时 WiFi profile")
 

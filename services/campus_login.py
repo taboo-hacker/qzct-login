@@ -9,16 +9,12 @@ import re
 from typing import Any
 
 import requests
-import urllib3
 from requests.exceptions import RequestException
 
 from core.config import ISP_MAPPING, get_config_snapshot
 from core.constants import CAMPUS_LOGIN_CONFIG, CAMPUS_LOGIN_HEADERS
 from core.exceptions import CampusAuthError, CampusNetworkError, JSONPParseError
 from infra.logging import error, info
-
-# 校园网认证服务器使用自签名证书，禁用 SSL 验证后需要抑制 urllib3 警告
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def _sanitize(msg: str) -> str:
@@ -105,9 +101,6 @@ def campus_login(cfg: dict[str, Any] | None = None) -> bool:
         "Referer": str(CAMPUS_LOGIN_CONFIG["referer"]),
     }
 
-    # 校园网认证服务器通常使用自签名证书，无法验证链
-    info("services.campus_login", "注意：SSL证书验证已禁用（校园网自签名证书）")
-
     try:
         with requests.Session() as session:
             info("services.campus_login", f"开始发送登录请求到 {login_url}")
@@ -119,7 +112,6 @@ def campus_login(cfg: dict[str, Any] | None = None) -> bool:
                     url=login_url,
                     data=params,
                     headers=headers,
-                    verify=False,
                     timeout=(3, 10),
                 )
             except RequestException as e:

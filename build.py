@@ -18,6 +18,7 @@ qzct-login 本地构建脚本
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -110,7 +111,13 @@ def _find_signing_thumbprint() -> str | None:
     """查找签名证书指纹：优先环境变量，其次自动查找 taboo-hacker 证书。"""
     thumbprint = os.environ.get("QZCT_CODE_SIGN_THUMBPRINT", "").strip()
     if thumbprint:
-        return thumbprint
+        # 指纹会被内插进 PowerShell 脚本，仅接受 40 位十六进制，防任意字符注入
+        if re.fullmatch(r"[0-9a-fA-F]{40}", thumbprint):
+            return thumbprint
+        print(
+            f"[签名] QZCT_CODE_SIGN_THUMBPRINT 非法（应为 40 位十六进制），已忽略并转为自动查找：{thumbprint!r}",
+            file=sys.stderr,
+        )
     script = (
         r"Get-ChildItem Cert:\CurrentUser\My | "
         "Where-Object { $_.Subject -like '*taboo-hacker*' -and $_.HasPrivateKey } | "
