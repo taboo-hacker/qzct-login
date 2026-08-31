@@ -1,7 +1,7 @@
 """
 infra 包模块测试
 
-测试日期工具（parse_date_str / is_date_in_period）、
+测试日期工具（parse_date_str / validate_period / is_date_in_period）、
 Logger 日志封装与 StreamRedirector 输出流重定向。
 通过 patch infra.logging.setup_logger 与 infra.logging.logger
 隔离真实日志输出。线程池管理测试已移至 test_gui.py（因依赖 PySide6）。
@@ -17,6 +17,7 @@ from infra import (
     is_date_in_period,
     parse_date_str,
 )
+from infra.date_utils import validate_period
 
 
 class TestParseDateStr:
@@ -46,6 +47,28 @@ class TestParseDateStr:
         """传入 None 应安全返回 None 而不抛异常。"""
         result = parse_date_str(None)
         assert result is None
+
+
+class TestValidatePeriod:
+    """validate_period 测试：时间段起止先后关系校验（设置面板各录入点共用单源文案）。"""
+
+    def test_start_after_end_returns_message(self) -> None:
+        """开始日期晚于结束日期时应返回统一错误文案。"""
+        assert validate_period("2026-01-10", "2026-01-05") == "开始日期不能晚于结束日期"
+
+    def test_start_equals_end_passes(self) -> None:
+        """起止同日（闭区间单日）应通过校验返回 None。"""
+        assert validate_period("2026-01-05", "2026-01-05") is None
+
+    def test_normal_order_passes(self) -> None:
+        """开始早于结束应通过校验返回 None。"""
+        assert validate_period("2026-01-01", "2026-01-05") is None
+
+    def test_unparseable_dates_return_none(self) -> None:
+        """任一日期不可解析时返回 None（交由调用方既有逻辑，不引入新行为）。"""
+        assert validate_period("invalid", "2026-01-05") is None
+        assert validate_period("2026-01-05", "") is None
+        assert validate_period("2026/01/05", "2026-01-01") is None
 
 
 class TestIsDateInPeriod:

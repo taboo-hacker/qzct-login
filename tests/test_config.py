@@ -65,6 +65,18 @@ class TestSaveConfig:
         with patch("core.config.os.replace", side_effect=OSError("disk full")):
             assert save_config() is False
 
+    def test_save_failure_cleans_up_tmp_file(self, temp_config_dir: Path) -> None:
+        """保存失败时应清理 mkstemp 临时文件，避免明文密码残留磁盘。"""
+        cfg_module._get_config_dir()
+        global_config.clear()
+        global_config.update({"USERNAME": "test_user", "PASSWORD": "login_secret"})
+
+        with patch("core.config.os.replace", side_effect=OSError("disk full")):
+            assert save_config() is False
+
+        leftovers = [p.name for p in temp_config_dir.iterdir() if p.name.startswith(".config.")]
+        assert leftovers == []
+
 
 class TestLoadConfig:
     """load_config 测试：正常加载、损坏/缺失文件回退，以及各类旧版数据迁移。"""
@@ -193,3 +205,32 @@ class TestLoadConfig:
         assert rules["WEEKLY_EXECUTE_DAYS"] == [0, 1, 2, 3, 4]
         assert rules["CUSTOM_HOLIDAY_PERIODS"] == []
         assert rules["CUSTOM_WORKDAY_PERIODS"] == []
+
+    @pytest.mark.parametrize(
+        "malformed_rules",
+        [
+            pytest.param([1, 2, 3], id="list"),
+            pytest.param("not-a-dict", id="str"),
+            pytest.param(None, id="null"),
+        ],
+    )
+    def test_load_resets_malformed_date_rules_only(
+        self, temp_config_dir: Path, malformed_rules: object
+    ) -> None:
+        """DATE_RULES 为 list/str/null 时仅重置该字段为默认结构，其余字段保留。
+
+        回归 F06：此前畸形 DATE_RULES 使补键循环抛 TypeError，
+        整份配置被回退默认值，用户设置与账号/WiFi 密码丢失。
+        """
+        _write_config_file(
+            temp_config_dir / "config.json",
+            {"USERNAME": "kept_user", "PASSWORD": "kept_secret", "DATE_RULES": malformed_rules},
+        )
+
+        assert load_config() is None
+
+        assert global_config["USERNAME"] == "kept_user"
+        assert global_config["PASSWORD"] == "kept_secret"
+        rules = global_config["DATE_RULES"]
+        assert isinstance(rules, dict)
+        assert set(rules.keys()) == set(cfg_module.DEFAULT_CONFIG["DATE_RULES"].keys())

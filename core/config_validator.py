@@ -14,6 +14,7 @@ import copy
 from typing import Any
 
 from core.constants import ISP_MAPPING
+from infra.date_utils import parse_date_str
 from infra.logging import warning
 
 
@@ -22,6 +23,24 @@ def _default(field: str) -> Any:
     from core.config import DEFAULT_CONFIG
 
     return copy.deepcopy(DEFAULT_CONFIG.get(field))
+
+
+def _is_valid_period_element(el: object) -> bool:
+    """判断区间列表元素是否合法：dict 且 start/end 均为可解析的 "YYYY-MM-DD"。
+
+    非法元素（字符串/数字/缺失日期/日期不可解析的 dict）会在
+    is_date_in_period 的 period.get("start") 处抛 AttributeError，
+    沿 should_work_today 传播到主窗口 __init__ 导致启动即崩，
+    因此在 validate_config 的元素清洗段统一丢弃。
+    """
+    if not isinstance(el, dict):
+        return False
+    start, end = el.get("start"), el.get("end")
+    # 先做 str 类型过滤：parse_date_str 内部的 lru_cache 收到
+    # 不可哈希入参（list/dict 等）会直接抛 TypeError 而非返回 None
+    if not isinstance(start, str) or not isinstance(end, str):
+        return False
+    return parse_date_str(start) is not None and parse_date_str(end) is not None
 
 
 # Schema 定义: field_name -> (expected_type, validator_fn | None)
@@ -149,5 +168,44 @@ def validate_config(config: dict[str, Any]) -> list[str]:
             config[field] = _default(field)
             fixed.append(field)
             warning("system_core", f"配置校验: {field} 缺失或类型错误，已重置为默认值")
+
+    # 区间列表元素级清洗：列表内的畸形元素（字符串/数字/缺失或不可解析日期的 dict）
+    # 能通过上面的 list 类型校验，却会让 is_date_in_period 抛 AttributeError，
+    # 沿 should_work_today 传播到主窗口构造期导致启动即崩，这里统一丢弃。
+    period_targets: list[tuple[str, list[Any]]] = []
+    if isinstance(config.get("HOLIDAY_PERIODS"), list):
+        period_targets.append(("HOLIDAY_PERIODS", config["HOLIDAY_PERIODS"]))
+    if isinstance(config.get("DATE_RULES"), dict):
+        date_rules_conf = config["DATE_RULES"]
+        for field in ("CUSTOM_HOLIDAY_PERIODS", "CUSTOM_WORKDAY_PERIODS"):
+            if isinstance(date_rules_conf.get(field), list):
+                period_targets.append((f"DATE_RULES.{field}", date_rules_conf[field]))
+    for field_name, elements in period_targets:
+        kept = [el for el in elements if _is_valid_period_element(el)]
+        dropped = len(elements) - len(kept)
+        if dropped:
+            elements[:] = kept  # elements 是 config 中对应列表的引用，原地更新
+            fixed.append(field_name)
+            warning(
+                "system_core",
+                f"配置校验: {field_name} 含 {dropped} 条非法条目"
+                "(需为 start/end 均可解析的 dict)，已丢弃",
+            )
+
+    # COMPENSATORY_WORKDAYS 元素应为可解析的 "YYYY-MM-DD" 字符串，
+    # 过滤不可解析的脏数据（date_rules 判定时本就会静默跳过它们，此处不致崩溃）
+    compensatory = config.get("COMPENSATORY_WORKDAYS")
+    if isinstance(compensatory, list):
+        kept_days = [
+            d for d in compensatory if isinstance(d, str) and parse_date_str(d) is not None
+        ]
+        dropped_days = len(compensatory) - len(kept_days)
+        if dropped_days:
+            compensatory[:] = kept_days
+            fixed.append("COMPENSATORY_WORKDAYS")
+            warning(
+                "system_core",
+                f"配置校验: COMPENSATORY_WORKDAYS 含 {dropped_days} 条不可解析的日期条目，已丢弃",
+            )
 
     return fixed

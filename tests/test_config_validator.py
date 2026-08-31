@@ -5,14 +5,19 @@ D2 测试：Config Schema 验证
 嵌套结构（DATE_RULES）的校验行为。
 策略：以 deepcopy(DEFAULT_CONFIG) 为基线，逐项注入非法值后断言
 字段被修复且函数返回被修复字段名列表（原地修改 + 返回修复清单）。
+另含 F07/B4 回归：区间列表（HOLIDAY_PERIODS / CUSTOM_*_PERIODS /
+COMPENSATORY_WORKDAYS）的元素级清洗，及清洗后 should_work_today
+不再因畸形元素抛 AttributeError。
 """
 
 import copy
+import datetime
 
 import pytest
 
-from core.config import DEFAULT_CONFIG
+from core.config import DEFAULT_CONFIG, global_config
 from core.config_validator import validate_config
+from core.date_rules import should_work_today
 
 
 class TestValidateConfigValid:
@@ -274,3 +279,136 @@ class TestValidateConfigReturnList:
 
         result = validate_config(config)
         assert len(result) >= 4
+
+
+class TestValidateConfigPeriodListElementCleaning:
+    """区间列表元素级清洗（F07/B4）：畸形元素被丢弃而非保留。
+
+    修复前 HOLIDAY_PERIODS / CUSTOM_HOLIDAY_PERIODS / CUSTOM_WORKDAY_PERIODS
+    仅校验 list 类型，字符串/数字等非 dict 元素会让 is_date_in_period 的
+    period.get("start") 抛 AttributeError，沿 should_work_today 传播到主窗口
+    构造期（_update_status_display 无 try/except），程序启动即崩且重启复现。
+    """
+
+    def test_holiday_periods_invalid_elements_dropped(self) -> None:
+        """HOLIDAY_PERIODS 仅保留正常 dict，畸形元素丢弃并记入 fixed"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        valid = {"name": "测试假期", "start": "2026-01-01", "end": "2026-01-03"}
+        config["HOLIDAY_PERIODS"] = [
+            valid,
+            "not a dict",
+            5,
+            {"start": "x", "end": "y"},
+            {"start": "2026-01-01"},  # 缺 end
+            {"start": ["2026-01-01"], "end": "2026-01-02"},  # start 不可哈希
+        ]
+
+        fixed = validate_config(config)
+        assert "HOLIDAY_PERIODS" in fixed
+        assert config["HOLIDAY_PERIODS"] == [valid]
+
+    def test_custom_holiday_periods_invalid_elements_dropped(self) -> None:
+        """CUSTOM_HOLIDAY_PERIODS 畸形元素丢弃，fixed 用 DATE_RULES. 前缀键名"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        valid = {"name": "自定义假", "start": "2026-02-01", "end": "2026-02-05"}
+        config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = [
+            valid,
+            "not a dict",
+            5,
+            {"start": "x", "end": "y"},
+            {"start": "2026-01-01"},  # 缺 end
+        ]
+
+        fixed = validate_config(config)
+        assert "DATE_RULES.CUSTOM_HOLIDAY_PERIODS" in fixed
+        assert config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] == [valid]
+
+    def test_custom_workday_periods_invalid_elements_dropped(self) -> None:
+        """CUSTOM_WORKDAY_PERIODS 畸形元素丢弃，fixed 用 DATE_RULES. 前缀键名"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        valid = {"name": "自定义班", "start": "2026-03-02", "end": "2026-03-03"}
+        config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] = [
+            valid,
+            "not a dict",
+            5,
+            {"start": "x", "end": "y"},
+            {"start": "2026-01-01"},  # 缺 end
+        ]
+
+        fixed = validate_config(config)
+        assert "DATE_RULES.CUSTOM_WORKDAY_PERIODS" in fixed
+        assert config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] == [valid]
+
+    def test_compensatory_workdays_invalid_elements_dropped(self) -> None:
+        """COMPENSATORY_WORKDAYS 中不可解析为 "YYYY-MM-DD" 的元素被过滤"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["COMPENSATORY_WORKDAYS"] = ["2026-01-04", "not-a-date", "2026/01/05", 5, None]
+
+        fixed = validate_config(config)
+        assert "COMPENSATORY_WORKDAYS" in fixed
+        assert config["COMPENSATORY_WORKDAYS"] == ["2026-01-04"]
+
+    def test_valid_period_lists_not_reported_fixed(self) -> None:
+        """全部合法的区间/日期列表不应触发任何修复"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["HOLIDAY_PERIODS"] = [{"name": "寒假", "start": "2026-01-15", "end": "2026-02-28"}]
+        config["COMPENSATORY_WORKDAYS"] = ["2026-01-04", "2026-02-14"]
+        config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = [
+            {"start": "2026-03-01", "end": "2026-03-02"}
+        ]
+        config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] = [
+            {"start": "2026-03-03", "end": "2026-03-04"}
+        ]
+
+        fixed = validate_config(config)
+        assert fixed == []
+
+
+class TestMalformedPeriodsShouldWorkTodayRegression:
+    """F07/B4 回归钉板：含畸形区间元素的配置清洗后，should_work_today 不抛异常且返回 bool。"""
+
+    def test_should_work_today_custom_rule_after_cleaning(self) -> None:
+        """自定义规则分支遍历清洗后的 CUSTOM_*_PERIODS，判定正常返回 bool"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["HOLIDAY_PERIODS"] = [
+            "not a dict",
+            5,
+            {"start": "x", "end": "y"},
+            {"name": "有效假期", "start": "2026-01-05", "end": "2026-01-06"},
+        ]
+        config["COMPENSATORY_WORKDAYS"] = ["not-a-date", 7]
+        config["DATE_RULES"]["ENABLE_CUSTOM_RULE"] = True
+        config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = [
+            "not a dict",
+            {"start": "x", "end": "y"},
+        ]
+        config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] = [42, {"start": "2026-01-05"}]
+        validate_config(config)
+
+        global_config.clear()
+        global_config.update(config)
+
+        # 2026-01-05 周一：自定义分支先遍历清洗后的两个区间列表（均为空），
+        # 再按 WEEKLY_EXECUTE_DAYS 判定 -> True。修复前此处抛 AttributeError。
+        result = should_work_today(datetime.date(2026, 1, 5))
+        assert isinstance(result, bool)
+        assert result is True
+
+    def test_should_work_today_base_branch_after_cleaning(self) -> None:
+        """基础规则分支遍历清洗后的 HOLIDAY_PERIODS，合法区间照常生效"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["HOLIDAY_PERIODS"] = [
+            "not a dict",
+            5,
+            {"name": "测试假期", "start": "2026-01-05", "end": "2026-01-06"},
+        ]
+        config["COMPENSATORY_WORKDAYS"] = ["not-a-date", "2026-01-04"]
+        validate_config(config)
+
+        global_config.clear()
+        global_config.update(config)
+
+        # 2026-01-05 周一命中清洗后保留的假期区间 -> False
+        assert should_work_today(datetime.date(2026, 1, 5)) is False
+        # 2026-01-04 周日命中清洗后保留的调休上班日 -> True
+        assert should_work_today(datetime.date(2026, 1, 4)) is True

@@ -9,9 +9,11 @@ WIFI_PASSWORD / PASSWORD 现在以明文形式保存在 config.json 中。
 旧版加密数据（ENC: 前缀）加载时会自动清空，需在设置中重新填写。
 """
 
+import contextlib
 import copy
 import json
 import os
+import tempfile
 import threading
 from typing import Any
 
@@ -224,6 +226,17 @@ def load_config() -> str | None:
                 else:
                     warning("system_core", f"未知 ISP_SUFFIX {suffix}，已丢弃")
 
+            # DATE_RULES 若被写成 list/str/null 等畸形结构，下方补键循环的
+            # 下标赋值会抛 TypeError，导致整份配置被回退默认值（用户数据丢失）；
+            # 此处先行重置为默认结构，将损失限定在该字段内
+            loaded_rules = new_config.get("DATE_RULES")
+            if not isinstance(loaded_rules, dict):
+                warning(
+                    "system_core",
+                    f"配置校验: DATE_RULES 类型错误(收到{type(loaded_rules).__name__})，已重置为默认值",
+                )
+                new_config["DATE_RULES"] = copy.deepcopy(DEFAULT_CONFIG["DATE_RULES"])
+
             # new_config 由 DEFAULT_CONFIG 深拷贝起步，COMPENSATORY_WORKDAYS/
             # DATE_RULES 键必然存在，只需为旧配置的 DATE_RULES 补齐缺失子键
             for key in DEFAULT_CONFIG["DATE_RULES"]:
@@ -274,13 +287,22 @@ def save_config() -> bool:
         # snapshot() 已返回深拷贝，直接落盘（无需再套一层 deepcopy）
         config_to_save: dict[str, Any] = global_config.snapshot()
 
-        # 原子写入：先写临时文件，再重命名，防止写入中断导致配置损坏
-        tmp_file = CONFIG_FILE + ".tmp"
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(config_to_save, f, ensure_ascii=False, indent=4)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_file, CONFIG_FILE)
+        # 原子写入：先写临时文件，再重命名，防止写入中断导致配置损坏。
+        # mkstemp 以 0600 权限（POSIX）创建不可预测路径的临时文件，避免
+        # 明文密码经 0644 中间文件暴露；与目标同目录保证 rename 不跨卷
+        fd, tmp_file = tempfile.mkstemp(prefix=".config.", suffix=".tmp", dir=CONFIG_DIR)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(config_to_save, f, ensure_ascii=False, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, CONFIG_FILE)
+        except BaseException:
+            # 写入/替换失败时清理残留临时文件（含明文密码，不可遗留）；
+            # 清理本身失败只记忽略——原始异常优先向上传递
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_file)
+            raise
         # config.json 含账号/WiFi 密码明文，落盘后立即收紧到仅当前用户可读写
         restrict_file_permissions(CONFIG_FILE)
         info("system_core", f"配置已保存到 {CONFIG_FILE}")
