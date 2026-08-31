@@ -174,9 +174,13 @@ def get_config_snapshot() -> dict[str, Any]:
     return global_config.snapshot()
 
 
-def load_config() -> None:
+def load_config() -> str | None:
     """
     加载配置文件（原地更新 global_config，不改变对象引用）。
+
+    Returns:
+        str | None: 失败原因（此时已回退默认配置）；None 表示加载成功。
+        面向用户的错误提示由调用方（GUI 层）负责展示，core 层不依赖 Qt。
     """
     _get_config_dir()
     try:
@@ -220,21 +224,17 @@ def load_config() -> None:
                 else:
                     warning("system_core", f"未知 ISP_SUFFIX {suffix}，已丢弃")
 
-            if "COMPENSATORY_WORKDAYS" not in new_config:
-                new_config["COMPENSATORY_WORKDAYS"] = DEFAULT_CONFIG["COMPENSATORY_WORKDAYS"].copy()
-
-            if "DATE_RULES" not in new_config:
-                new_config["DATE_RULES"] = copy.deepcopy(DEFAULT_CONFIG["DATE_RULES"])
-            else:
-                for key in DEFAULT_CONFIG["DATE_RULES"]:
-                    if key not in new_config["DATE_RULES"]:
-                        new_config["DATE_RULES"][key] = DEFAULT_CONFIG["DATE_RULES"][key]
-                if "CUSTOM_HOLIDAYS" in new_config["DATE_RULES"]:
-                    new_config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = []
-                    del new_config["DATE_RULES"]["CUSTOM_HOLIDAYS"]
-                if "CUSTOM_WORKDAYS" in new_config["DATE_RULES"]:
-                    new_config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] = []
-                    del new_config["DATE_RULES"]["CUSTOM_WORKDAYS"]
+            # new_config 由 DEFAULT_CONFIG 深拷贝起步，COMPENSATORY_WORKDAYS/
+            # DATE_RULES 键必然存在，只需为旧配置的 DATE_RULES 补齐缺失子键
+            for key in DEFAULT_CONFIG["DATE_RULES"]:
+                if key not in new_config["DATE_RULES"]:
+                    new_config["DATE_RULES"][key] = DEFAULT_CONFIG["DATE_RULES"][key]
+            if "CUSTOM_HOLIDAYS" in new_config["DATE_RULES"]:
+                new_config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = []
+                del new_config["DATE_RULES"]["CUSTOM_HOLIDAYS"]
+            if "CUSTOM_WORKDAYS" in new_config["DATE_RULES"]:
+                new_config["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] = []
+                del new_config["DATE_RULES"]["CUSTOM_WORKDAYS"]
 
             # Schema 验证：校验字段类型和值域，非法字段回退默认值
             fixed_fields = validate_config(new_config)
@@ -258,13 +258,8 @@ def load_config() -> None:
     except Exception as e:
         error("system_core", f"加载配置失败，使用默认配置：{e}")
         global_config.replace_all(copy.deepcopy(DEFAULT_CONFIG))
-        from PySide6.QtWidgets import QMessageBox
-
-        QMessageBox.warning(
-            None,
-            "配置加载失败",
-            f"配置文件加载失败，已恢复为默认设置：\n{e}\n\n请检查 {CONFIG_FILE} 文件是否损坏。",
-        )
+        return str(e)
+    return None
 
 
 def save_config() -> bool:
@@ -272,7 +267,8 @@ def save_config() -> bool:
     保存配置到文件（使用原子写入，防止写入中断导致文件损坏）
 
     Returns:
-        bool: 保存是否成功
+        bool: 保存是否成功。失败详情已记入日志；面向用户的错误提示
+        由调用方（GUI 层）负责展示，core 层不依赖 Qt。
     """
     try:
         # snapshot() 已返回深拷贝，直接落盘（无需再套一层 deepcopy）
@@ -291,7 +287,4 @@ def save_config() -> bool:
         return True
     except Exception as e:
         error("system_core", f"保存配置失败：{e}")
-        from PySide6.QtWidgets import QMessageBox
-
-        QMessageBox.critical(None, "错误", f"保存配置失败：{e}")
         return False

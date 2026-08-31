@@ -60,14 +60,10 @@ class TestSaveConfig:
         assert "MASTER_PASSWORD" not in saved
 
     def test_save_failure_returns_false(self, temp_config_dir: Path) -> None:
-        """写入失败（os.replace 抛 OSError）时返回 False 并弹出 critical 错误框。"""
+        """写入失败（os.replace 抛 OSError）时返回 False；错误提示由 GUI 层负责。"""
         cfg_module._get_config_dir()
-        with (
-            patch("core.config.os.replace", side_effect=OSError("disk full")),
-            patch("PySide6.QtWidgets.QMessageBox.critical") as mock_critical,
-        ):
+        with patch("core.config.os.replace", side_effect=OSError("disk full")):
             assert save_config() is False
-            mock_critical.assert_called_once()
 
 
 class TestLoadConfig:
@@ -120,12 +116,12 @@ class TestLoadConfig:
         assert global_config["SHUTDOWN_HOUR"] == 23
 
     def test_load_corrupted_file_falls_back_to_defaults(self, temp_config_dir: Path) -> None:
-        """配置文件 JSON 损坏时回退默认配置并弹 warning 提示。"""
+        """配置文件 JSON 损坏时回退默认配置，并返回失败原因（弹窗由 GUI 层负责）。"""
         (temp_config_dir / "config.json").write_text("{not valid json", encoding="utf-8")
-        with patch("PySide6.QtWidgets.QMessageBox.warning") as mock_warning:
-            load_config()
-            mock_warning.assert_called_once()
+        result = load_config()
 
+        assert result is not None
+        assert "expecting" in result.lower() or result  # 具体文案不锁定，非空即可
         assert global_config["WIFI_NAME"] == ""
 
     def test_load_cleans_legacy_key_files(self, temp_config_dir: Path) -> None:

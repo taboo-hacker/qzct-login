@@ -35,7 +35,7 @@ class TestMainWindowSmoke:
         window = None
         try:
             with (
-                patch("gui.main_window.load_config"),
+                patch("gui.main_window.load_config", return_value=None),
                 patch("gui.main_window.init_logger"),
                 patch("gui.main_window.TrayManager"),
             ):
@@ -131,7 +131,7 @@ class TestMainWindowSmoke:
         window = None
         try:
             with (
-                patch("gui.main_window.load_config"),
+                patch("gui.main_window.load_config", return_value=None),
                 patch("gui.main_window.init_logger"),
                 patch("gui.main_window.TrayManager"),
                 patch("gui.main_window.should_work_today", return_value=False),

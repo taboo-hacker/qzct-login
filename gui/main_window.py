@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import global_config, load_config
-from core.constants import LOG_FILE
+from core.constants import CONFIG_FILE, LOG_FILE
 from core.date_rules import should_work_today
 from gui.dialogs import AboutDialog, SettingsPanel
 from gui.styling.theme_manager import ThemeManager
@@ -92,7 +92,14 @@ class MainWindow(QMainWindow):
         # 必须先加载配置并应用保存的主题，再构建界面：
         # 设置面板/状态显示在构建时读取 global_config，顺序颠倒会导致
         # 面板显示默认空值，保存时把空值写回、覆盖已保存的配置
-        load_config()
+        load_error = load_config()
+        if load_error:
+            QMessageBox.warning(
+                self,
+                "配置加载失败",
+                f"配置文件加载失败，已恢复为默认设置：\n{load_error}\n\n"
+                f"请检查 {CONFIG_FILE} 文件是否损坏。",
+            )
         ThemeManager.set_theme(str(global_config.get("THEME", "light")))
 
         # 构建界面（此时 global_config 已是加载后的值）
@@ -362,10 +369,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def run_on_start(self) -> None:
-        """程序启动后延迟 1 秒自动执行任务链（仅一次，_task_chain_started 防重）。"""
+        """程序启动后延迟 1 秒自动执行任务链（仅一次，_task_chain_started 防重）。
+
+        首次使用（账号与 WiFi 均未配置）时跳过自动执行：空账号登录注定
+        失败，且链尾仍会按默认 23:00 设置关机——相当于"装完即被安排关机"。
+        """
         if self._task_chain_started:
             return
         self._task_chain_started = True
+        username = str(global_config.get("USERNAME", ""))
+        wifi_name = str(global_config.get("WIFI_NAME", ""))
+        if not username and not wifi_name:
+            info("main", "首次使用：账号与 WiFi 均未配置，跳过启动自动执行")
+            self.footer_status.setText("尚未配置账号，已跳过自动执行")
+            self._tray.notify(
+                "校园网自动登录",
+                "尚未配置账号，已跳过自动执行。请到「设置」填写 WiFi 与账号后手动执行",
+            )
+            return
         info("main", "程序启动，开始自动执行任务链")
         QTimer.singleShot(1000, self.start_task_chain)
 
@@ -417,24 +438,68 @@ class MainWindow(QMainWindow):
             self.footer_status.setText(f"{task_name} 出错")
 
     def _on_chain_success(self, success: bool, results: dict[str, Any]) -> None:
-        """任务链整体完成回调：区分"全部执行/今天无需执行/部分失败"三种结果。"""
+        """任务链整体完成回调：如实报告每一步的成败与关机设置状态。
+
+        任务失败不抛异常（链仍会"成功"走完，保底设置关机），因此
+        success=True 不代表每步都成功——需逐项核对 results。
+        """
         self._set_buttons_enabled(True)
-        if success:
-            # 检查执行条件步骤：今天无需执行时给出不同提示
-            check_result = results.get("检查执行条件")
-            need_work = not isinstance(check_result, dict) or check_result.get("need_work", True)
-            if need_work:
-                self.footer_status.setText("所有任务执行完成")
-                info("main", "任务链执行成功")
-                self._tray.notify("校园网自动登录", "所有任务执行完成")
-            else:
-                self.footer_status.setText("今天无需执行（节假日/周末）")
-                info("main", "任务链提前结束：今天无需执行")
-                self._tray.notify("校园网自动登录", "今天无需执行任务")
-        else:
+        if not success:
             self.footer_status.setText("部分任务失败")
             info("main", "任务链执行完成，但有任务失败")
             self._tray.notify("校园网自动登录", "部分任务执行失败，请查看日志")
+            return
+
+        check_result = results.get("检查执行条件")
+        need_work = not isinstance(check_result, dict) or check_result.get("need_work", True)
+        if not need_work:
+            self.footer_status.setText("今天无需执行（节假日/周末）")
+            info("main", "任务链提前结束：今天无需执行")
+            self._tray.notify("校园网自动登录", "今天无需执行任务")
+            return
+
+        # 逐项核对：wifi_connected=None 表示未配置 WiFi（有线用户），不算失败
+        failed: list[str] = []
+        wifi_result = results.get("连接WiFi")
+        if isinstance(wifi_result, dict) and wifi_result.get("wifi_connected") is False:
+            failed.append("WiFi 连接")
+        login_result = results.get("登录校园网")
+        if isinstance(login_result, dict) and not login_result.get("login_successful", False):
+            failed.append("校园网登录")
+
+        shutdown_result = results.get("设置定时关机")
+        shutdown_set = isinstance(shutdown_result, dict) and shutdown_result.get(
+            "shutdown_set", False
+        )
+        # reason=time_passed（已过今日关机时间）是正常跳过，不算失败
+        shutdown_failed = isinstance(shutdown_result, dict) and (
+            shutdown_result.get("reason") == "command_failed" or "error" in shutdown_result
+        )
+        if shutdown_failed:
+            failed.append("定时关机")
+
+        hh = int(global_config.get("SHUTDOWN_HOUR", 23))
+        mm = int(global_config.get("SHUTDOWN_MIN", 0))
+        if failed:
+            fail_text = "、".join(failed)
+            summary = (
+                f"{fail_text}失败；已设置 {hh:02d}:{mm:02d} 定时关机"
+                if shutdown_set
+                else f"{fail_text}失败"
+            )
+            self.footer_status.setText(summary)
+            error("main", f"任务链执行完成，存在失败步骤：{fail_text}", exc_info=False)
+            self._tray.notify("校园网自动登录", f"{summary}，详情见运行日志")
+        elif shutdown_set:
+            self.footer_status.setText(f"所有任务执行完成，已设置 {hh:02d}:{mm:02d} 关机")
+            info("main", "任务链执行成功")
+            self._tray.notify(
+                "校园网自动登录", f"所有任务执行完成，已设置 {hh:02d}:{mm:02d} 定时关机"
+            )
+        else:
+            self.footer_status.setText("所有任务执行完成（已过今日关机时间，未设置关机）")
+            info("main", "任务链执行成功（已过今日关机时间，未设置关机）")
+            self._tray.notify("校园网自动登录", "任务执行完成（已过今日关机时间，未设置关机）")
 
     def _on_chain_error(self, results: dict[str, Any]) -> None:
         """任务链异常终止回调：恢复按钮并提示失败。"""
