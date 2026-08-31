@@ -19,14 +19,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QSystemTrayIcon,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from core.config import global_config, load_config
+from core.config import get_config_snapshot, global_config, load_config
 from core.constants import CONFIG_FILE, LOG_FILE
-from core.date_rules import should_work_today
+from core.date_rules import describe_source, rule_source, should_work_today
 from gui.dialogs import AboutDialog, SettingsPanel
 from gui.log_sink import QtLogSink
 from gui.styling.theme_manager import ThemeManager
@@ -38,7 +39,6 @@ from infra import (
     error,
     info,
     init_logger,
-    parse_date_str,
 )
 from infra.concurrency import TaskChain, TaskContext, TaskExecutor
 from services.campus_login import campus_login
@@ -49,7 +49,12 @@ from services.tasks import (
     task_connect_wifi,
     task_set_shutdown,
 )
-from services.wifi import connect_wifi, interruptible_sleep, is_wifi_connected
+from services.wifi import (
+    connect_wifi,
+    estimate_wifi_retry_budget,
+    interruptible_sleep,
+    is_wifi_connected,
+)
 from utils.version import get_project_version
 
 
@@ -84,8 +89,17 @@ class MainWindow(QMainWindow):
         self.resize(800, 500)
         self._force_quit = False
         self._task_chain_started: bool = False
+        # 业务级忙标志，与按钮禁用策略解耦——按钮状态只服务 UI，
+        # 防重入判断只看本标志（按钮因其他原因被禁用时守卫不误拒，
+        # 未来只禁用部分按钮时守卫也不漏防）
+        self._task_busy: bool = False
         # 本次会话是否成功设置过定时关机（退出时据此提醒"退出不会取消关机"）
         self._shutdown_scheduled: bool = False
+        # 定时关机布防截止时刻（None=未布防）；用于左卡片剩余时间与托盘状态
+        self._shutdown_deadline: datetime.datetime | None = None
+        # 界面当前展示的日期：跨零点后由时钟回调对比触发"今日状态"刷新
+        # （须在 _init_ui 之前初始化，_update_status_display 换天时依赖它）
+        self._shown_date: datetime.date = datetime.date.today()
 
         # 日志组件先创建，供日志系统使用
         self.log_text = LogTextEdit()
@@ -215,6 +229,12 @@ class MainWindow(QMainWindow):
         self.time_label.setProperty("role", "muted")
         v.addWidget(self.time_label)
 
+        # 定时关机布防状态（任务链成功设置关机后显示剩余时间，未布防时隐藏）
+        self.shutdown_armed_label = QLabel("")
+        self.shutdown_armed_label.setProperty("role", "muted")
+        self.shutdown_armed_label.hide()
+        v.addWidget(self.shutdown_armed_label)
+
         # ---- 分隔 + 任务操作 ----
         v.addWidget(self._h_line())
 
@@ -325,7 +345,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _update_time_display(self) -> None:
-        """每秒刷新底部时钟。
+        """每秒刷新底部时钟与关机布防倒计时；跨零点时刷新"今日状态"卡片。
 
         时钟是独立的常驻标签，不与业务状态共用 footer_status——
         否则每秒刷新会把"正在测试/已保存"等瞬时反馈立即冲掉。
@@ -333,9 +353,54 @@ class MainWindow(QMainWindow):
         now = datetime.datetime.now()
         if hasattr(self, "clock_label"):
             self.clock_label.setText(now.strftime("%H:%M:%S"))
+        # 常驻跨零点：日期/徽标/规则来源仅在构造与保存配置时刷新会冻结在
+        # 昨天，这里在换天时补刷（当天是否需要执行也可能随日期变化）
+        if now.date() != self._shown_date:
+            self._shown_date = now.date()
+            self._update_status_display()
+        self._update_shutdown_armed_display()
+
+    def _set_footer(self, text: str) -> None:
+        """写底部状态文本并同步 tooltip。
+
+        footer 宽度有限，长文案（如失败摘要）会被 QSS 省略号截断，
+        挂上同名 tooltip 后悬停仍可读全文。
+        """
+        self.footer_status.setText(text)
+        self.footer_status.setToolTip(text)
+
+    def _update_shutdown_armed_display(self) -> None:
+        """按布防截止时刻刷新左卡片剩余时间与托盘状态。
+
+        未布防时隐藏标签并还原托盘；剩余时间归零后显示"已到关机时间"。
+        """
+        armed = self._shutdown_deadline is not None
+        detail = ""
+        if hasattr(self, "shutdown_armed_label"):
+            if self._shutdown_deadline is None:
+                self.shutdown_armed_label.hide()
+            else:
+                remaining = self._shutdown_deadline - datetime.datetime.now()
+                total_seconds = int(remaining.total_seconds())
+                if total_seconds > 0:
+                    detail = (
+                        f"剩 {total_seconds // 3600:02d}:"
+                        f"{total_seconds % 3600 // 60:02d}:{total_seconds % 60:02d}"
+                    )
+                else:
+                    detail = "已到关机时间"
+                self.shutdown_armed_label.setText(f"已布防关机 · {detail}")
+                self.shutdown_armed_label.show()
+        # 托盘 tooltip 与"取消定时关机"菜单项跟随布防状态
+        self._tray.set_shutdown_status(armed=armed, detail=detail)
 
     def _set_buttons_enabled(self, enabled: bool, busy_text: str = "运行中...") -> None:
-        """任务/测试运行期间禁用任务相关按钮，结束后恢复（防止重复触发）。"""
+        """任务/测试运行期间禁用任务相关按钮，结束后恢复（防止重复触发）。
+
+        同时维护业务级忙标志 _task_busy（置于方法首行，异常路径也保证一致）：
+        按钮可用性只是 UI 呈现，防重入守卫只读 _task_busy，两者解耦。
+        """
+        self._task_busy = not enabled
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
@@ -344,22 +409,14 @@ class MainWindow(QMainWindow):
     def _update_status_display(self) -> None:
         """刷新左侧卡片：日期、执行状态徽标、生效规则来源、关机时间。
 
-        规则来源的判断顺序：硬编码调休日 → 自定义规则 → 默认（国务院安排）。
+        规则来源委托 core.date_rules.rule_source（唯一优先级阶梯：自定义规则
+        最高，其次硬编码调休/节假日），本方法只做文案翻译——旧版手写阶梯
+        曾把调休日排在自定义规则之前，与判定核心相反导致同屏矛盾。
         徽标状态变化后需 unpolish/polish 手动刷新 QSS（属性选择器不自动重绘）。
         """
         today = datetime.date.today()
         need_work = should_work_today()
-        date_rules = global_config.get("DATE_RULES", {})
-
-        rule_source = "国务院官方节假日"
-        if today in [
-            parsed
-            for d in global_config.get("COMPENSATORY_WORKDAYS", [])
-            if (parsed := parse_date_str(d)) is not None
-        ]:
-            rule_source = "调休上班日"
-        elif date_rules.get("ENABLE_CUSTOM_RULE", False):
-            rule_source = "自定义规则"
+        rule_source_text = describe_source(rule_source(today)[0])
 
         work_status = "今天需要执行任务" if need_work else "今天无需执行"
         weekday = "一二三四五六日"[today.weekday()]
@@ -372,7 +429,7 @@ class MainWindow(QMainWindow):
         if style is not None:
             style.unpolish(self.status_badge)
             style.polish(self.status_badge)
-        self.rule_label.setText(f"执行规则：{rule_source}")
+        self.rule_label.setText(f"执行规则：{rule_source_text}")
         self.time_label.setText(
             f"关机时间：{global_config.get('SHUTDOWN_HOUR', 23):02d}:"
             f"{global_config.get('SHUTDOWN_MIN', 0):02d}"
@@ -428,7 +485,9 @@ class MainWindow(QMainWindow):
 
         chain = TaskChain(parent=self)
         chain.add(task_check_condition)
-        chain.add(task_connect_wifi)
+        # WiFi 步骤使用按配置动态估算的超时预算（重试次数/退避均可配，
+        # 静态超时会误杀长重试链），覆盖 @task 装饰器的默认超时
+        chain.add(task_connect_wifi, timeout=estimate_wifi_retry_budget(get_config_snapshot()))
         chain.add(task_campus_login)
         chain.add(task_set_shutdown)
         chain.on_success(self._on_chain_success)
@@ -443,13 +502,13 @@ class MainWindow(QMainWindow):
         """单个任务成功（TaskExecutor.finished 信号，主线程执行）。"""
         info("main", f"任务完成: {task_name}")
         if hasattr(self, "footer_status"):
-            self.footer_status.setText(f"{task_name} 完成")
+            self._set_footer(f"{task_name} 完成")
 
     def _on_task_error(self, task_name: str, error_msg: str) -> None:
         """单个任务抛异常（TaskExecutor.error 信号，主线程执行）。"""
         error("main", f"任务出错: {task_name} - {error_msg}")
         if hasattr(self, "footer_status"):
-            self.footer_status.setText(f"{task_name} 出错")
+            self._set_footer(f"{task_name} 出错")
 
     def _on_chain_success(self, success: bool, results: dict[str, Any]) -> None:
         """任务链整体完成回调：如实报告每一步的成败与关机设置状态。
@@ -459,15 +518,19 @@ class MainWindow(QMainWindow):
         """
         self._set_buttons_enabled(True)
         if not success:
-            self.footer_status.setText("部分任务失败")
+            self._set_footer("部分任务失败")
             info("main", "任务链执行完成，但有任务失败")
-            self._tray.notify("校园网自动登录", "部分任务执行失败，请查看日志")
+            self._tray.notify(
+                "校园网自动登录",
+                "部分任务执行失败，请查看日志",
+                icon=QSystemTrayIcon.MessageIcon.Warning,
+            )
             return
 
         check_result = results.get("检查执行条件")
         need_work = not isinstance(check_result, dict) or check_result.get("need_work", True)
         if not need_work:
-            self.footer_status.setText("今天无需执行（节假日/周末）")
+            self._set_footer("今天无需执行（节假日/周末）")
             info("main", "任务链提前结束：今天无需执行")
             self._tray.notify("校园网自动登录", "今天无需执行任务")
             return
@@ -495,8 +558,10 @@ class MainWindow(QMainWindow):
         hh = int(global_config.get("SHUTDOWN_HOUR", 23))
         mm = int(global_config.get("SHUTDOWN_MIN", 0))
         if shutdown_set:
-            # 记录本次会话已设置关机：退出程序时的提醒与取消入口都依赖它
+            # 记录本次会话已设置关机：退出程序时的提醒与取消入口都依赖它；
+            # 同时按返回的 seconds 计算布防截止时刻，供左卡片/托盘展示剩余时间
             self._shutdown_scheduled = True
+            self._arm_shutdown_deadline(shutdown_result, hh, mm)
         if failed:
             fail_text = "、".join(failed)
             summary = (
@@ -504,65 +569,102 @@ class MainWindow(QMainWindow):
                 if shutdown_set
                 else f"{fail_text}失败"
             )
-            self.footer_status.setText(summary)
+            self._set_footer(summary)
             error("main", f"任务链执行完成，存在失败步骤：{fail_text}", exc_info=False)
-            self._tray.notify("校园网自动登录", f"{summary}，详情见运行日志")
+            self._tray.notify(
+                "校园网自动登录",
+                f"{summary}，详情见运行日志",
+                icon=QSystemTrayIcon.MessageIcon.Warning,
+            )
         elif shutdown_set:
-            self.footer_status.setText(f"所有任务执行完成，已设置 {hh:02d}:{mm:02d} 关机")
+            self._set_footer(f"所有任务执行完成，已设置 {hh:02d}:{mm:02d} 关机")
             info("main", "任务链执行成功")
             self._tray.notify(
                 "校园网自动登录", f"所有任务执行完成，已设置 {hh:02d}:{mm:02d} 定时关机"
             )
         else:
-            self.footer_status.setText("所有任务执行完成（已过今日关机时间，未设置关机）")
+            self._set_footer("所有任务执行完成（已过今日关机时间，未设置关机）")
             info("main", "任务链执行成功（已过今日关机时间，未设置关机）")
             self._tray.notify("校园网自动登录", "任务执行完成（已过今日关机时间，未设置关机）")
+
+    def _arm_shutdown_deadline(self, shutdown_result: object, hh: int, mm: int) -> None:
+        """按任务链返回的关机结果计算布防截止时刻并刷新显示。
+
+        seconds（Windows 关机命令实际生效的秒数）为第一数据源；缺失时按
+        配置的 hh:mm 组合今日时刻兜底。设置成功时 task_set_shutdown 必返回
+        seconds，兜底仅防御性保留。
+        """
+        seconds: int | None = None
+        if isinstance(shutdown_result, dict):
+            raw_seconds = shutdown_result.get("seconds")
+            if isinstance(raw_seconds, (int, float)):
+                seconds = int(raw_seconds)
+        if seconds is not None:
+            self._shutdown_deadline = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+        else:
+            now = datetime.datetime.now()
+            self._shutdown_deadline = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        self._update_shutdown_armed_display()
 
     def _on_chain_error(self, results: dict[str, Any]) -> None:
         """任务链异常终止回调：恢复按钮并提示失败。"""
         self._set_buttons_enabled(True)
-        self.footer_status.setText("任务链执行失败")
+        self._set_footer("任务链执行失败")
         error("main", f"任务链执行失败: {results}")
+        # 本应用常驻托盘（窗口最小化不可见），链级失败必须以气泡形式可见，
+        # 否则定时关机未设置这一事实对用户完全静默
+        self._tray.notify(
+            "任务链执行失败",
+            "任务链异常终止，定时关机未设置，详情见运行日志",
+            icon=QSystemTrayIcon.MessageIcon.Critical,
+        )
 
     # ------------------------------------------------------------------
     # 按钮事件
     # ------------------------------------------------------------------
+
+    def _confirm(self, title: str, text: str, default_no: bool = True) -> bool:
+        """统一确认框：危险操作默认聚焦"否"，回车不直接放行。
+
+        default_no=False 用于非破坏性操作（单项测试等），与 Qt 未显式
+        指定默认按钮时的行为保持一致；所有确认点共用本方法，避免
+        样板复制导致的默认按钮漂移。
+        """
+        # bool(...) 收敛返回类型：PySide6 存根缺失（Any 环境）与
+        # 真实存根（enum.Flag 比较）两种 mypy 模式下都得到 bool
+        return bool(
+            QMessageBox.question(
+                self,
+                title,
+                text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No if default_no else QMessageBox.StandardButton.Yes,
+            )
+            == QMessageBox.StandardButton.Yes
+        )
 
     def on_run_once(self) -> None:
         """「立即执行」按钮：确认后手动触发一次完整任务链（Ctrl+R）。
 
         确认框默认聚焦"否"：执行链会设置定时关机，属危险操作，回车不应直接放行。
         """
-        if (
-            QMessageBox.question(
-                self,
-                "确认",
-                "是否立即执行一次完整任务（WiFi+登录+关机）？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            == QMessageBox.StandardButton.Yes
-        ):
+        if self._confirm("确认", "是否立即执行一次完整任务（WiFi+登录+关机）？", default_no=True):
             info("main", "用户手动触发：开始执行完整任务链")
             self.start_task_chain()
 
     def on_cancel_shutdown(self) -> None:
-        """「取消关机」按钮：确认后在后台执行 shutdown /a，并按返回值反馈结果。"""
-        if (
-            QMessageBox.question(
-                self,
-                "确认",
-                "是否取消已设置的关机任务？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            != QMessageBox.StandardButton.Yes
-        ):
+        """「取消关机」按钮：确认后在后台执行 shutdown /a，并按返回值反馈结果。
+
+        防重入检查先于确认框：任务执行中直接提示用户（而非确认"是"之后
+        静默吞掉请求）；cancel_btn 不禁用，保证用户始终能得到反馈。
+        """
+        # 防重入：任务链/其他测试进行中时不再受理（但给出可见反馈）
+        if self._task_busy:
+            info("main", "已有任务进行中，忽略取消关机请求")
+            QMessageBox.information(self, "提示", "任务正在执行中，暂时无法取消关机，请稍后再试")
             return
 
-        # 防重入：任务链/其他测试进行中时不再受理
-        if not self.run_btn.isEnabled():
-            info("main", "已有任务进行中，忽略取消关机请求")
+        if not self._confirm("确认", "是否取消已设置的关机任务？", default_no=True):
             return
 
         self._set_buttons_enabled(False, busy_text="取消中...")
@@ -584,6 +686,9 @@ class MainWindow(QMainWindow):
         self._set_buttons_enabled(True)
         if result is True:
             self._shutdown_scheduled = False
+            # 关机已取消：清空布防截止时刻并同步左卡片/托盘状态
+            self._shutdown_deadline = None
+            self._update_shutdown_armed_display()
             info("main", "用户手动取消了已设置的关机任务")
             self.footer_status.setText("已取消关机")
             QMessageBox.information(self, "完成", "已成功取消关机任务")
@@ -617,22 +722,21 @@ class MainWindow(QMainWindow):
         """「测试 WiFi」按钮：后台线程单独测试 WiFi 连接（不走任务链）。
 
         结果通过字符串状态码区分（见 _do_wifi_test 返回值），
-        完成后弹窗告知用户。
+        完成后弹窗告知用户。防重入检查先于确认框（与取消关机一致）：
+        忙时直接提示，而非确认"是"之后静默吞掉请求。
         """
         wifi_name = global_config.get("WIFI_NAME", "")
         if not wifi_name:
             QMessageBox.warning(self, "提示", "请先在设置中配置 WiFi 名称")
             return
 
-        if (
-            QMessageBox.question(self, "确认", f"是否测试连接 WiFi：{wifi_name}？")
-            != QMessageBox.StandardButton.Yes
-        ):
+        # 防重入：任务链/其他测试进行中时不再受理（避免并发操作 WiFi）
+        if self._task_busy:
+            info("main", "已有任务进行中，忽略 WiFi 测试请求")
             return
 
-        # 防重入：任务链/其他测试进行中时不再受理（避免并发操作 WiFi）
-        if not self.run_btn.isEnabled():
-            info("main", "已有任务进行中，忽略 WiFi 测试请求")
+        # 非破坏性测试：维持默认"是"，回车直接开始测试
+        if not self._confirm("确认", f"是否测试连接 WiFi：{wifi_name}？", default_no=False):
             return
 
         self._set_buttons_enabled(False, busy_text="测试中...")
@@ -693,22 +797,21 @@ class MainWindow(QMainWindow):
         """「测试登录」按钮：后台线程单独测试校园网认证（不走任务链）。
 
         按返回值区分成功/失败弹窗，详细过程写入运行日志
-        （campus_login 内部已分级记录）。
+        （campus_login 内部已分级记录）。防重入检查先于确认框
+        （与取消关机/WiFi 测试一致）。
         """
         username = global_config.get("USERNAME", "")
         if not username:
             QMessageBox.warning(self, "提示", "请先在设置中配置校园网账号")
             return
 
-        if (
-            QMessageBox.question(self, "确认", "是否测试校园网登录？")
-            != QMessageBox.StandardButton.Yes
-        ):
+        # 防重入：任务链/其他测试进行中时不再受理
+        if self._task_busy:
+            info("main", "已有任务进行中，忽略登录测试请求")
             return
 
-        # 防重入：任务链/其他测试进行中时不再受理
-        if not self.run_btn.isEnabled():
-            info("main", "已有任务进行中，忽略登录测试请求")
+        # 非破坏性测试：维持默认"是"，回车直接开始测试
+        if not self._confirm("确认", "是否测试校园网登录？", default_no=False):
             return
 
         self._set_buttons_enabled(False, busy_text="测试中...")
@@ -818,18 +921,14 @@ class MainWindow(QMainWindow):
     def _real_close(self) -> None:
         """真实退出：确认关机仍在生效后置标志，触发 closeEvent 走完整清理流程。"""
         # 已设置定时关机时提醒一次：关机由 Windows 调度，退出程序不会取消它
-        if self._shutdown_scheduled:
-            ret = QMessageBox.question(
-                self,
-                "确认退出",
-                "确定退出程序？\n\n"
-                "注意：已设置的定时关机由 Windows 调度，退出本程序后仍会按时执行；"
-                "如需取消请先点「取消关机」。",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if ret != QMessageBox.StandardButton.Yes:
-                return
+        if self._shutdown_scheduled and not self._confirm(
+            "确认退出",
+            "确定退出程序？\n\n"
+            "注意：已设置的定时关机由 Windows 调度，退出本程序后仍会按时执行；"
+            "如需取消请先点「取消关机」。",
+            default_no=True,
+        ):
+            return
         self._force_quit = True
         self.close()
 
@@ -850,16 +949,13 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
 
-        # 先询问用户是否强制退出（在 shutdown 之前）
+        # 先询问用户是否强制退出（在 shutdown 之前）；维持原有默认"是"
         if self.task_executor:
             active_threads = self.task_executor.active_count
-            if active_threads > 0 and (
-                QMessageBox.question(
-                    self,
-                    "确认",
-                    f"有 {active_threads} 个任务正在执行中，是否强制退出？",
-                )
-                != QMessageBox.StandardButton.Yes
+            if active_threads > 0 and not self._confirm(
+                "确认",
+                f"有 {active_threads} 个任务正在执行中，是否强制退出？",
+                default_no=False,
             ):
                 event.ignore()
                 return

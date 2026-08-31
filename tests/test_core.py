@@ -12,7 +12,7 @@ import datetime
 from typing import Any
 
 from core.config import ISP_MAPPING, get_config_snapshot, global_config
-from core.date_rules import should_work_today
+from core.date_rules import SOURCE_TEXT, describe_source, rule_source, should_work_today
 
 
 class TestConfigManagement:
@@ -167,6 +167,57 @@ class TestDateRules:
         # 2026-05-04 在硬编码劳动节假期内，但自定义工作日区间优先
         workday = datetime.date(2026, 5, 4)
         assert should_work_today(workday) is True
+
+
+class TestRuleSourceText:
+    """来源文案单一数据源测试：SOURCE_TEXT / describe_source 的映射与兜底。"""
+
+    def test_source_text_covers_six_named_sources(self) -> None:
+        """SOURCE_TEXT 应恰好覆盖六个具名来源（自定义 4 项 + 调休 + 内置节假日）。"""
+        assert set(SOURCE_TEXT) == {
+            "custom_workday",
+            "custom_holiday",
+            "custom_weekly_work",
+            "custom_weekly_rest",
+            "compensatory",
+            "builtin_holiday",
+        }
+
+    def test_describe_source_maps_named_sources(self) -> None:
+        """具名来源应翻译为对应文案。"""
+        assert describe_source("custom_workday") == "自定义工作日"
+        assert describe_source("custom_holiday") == "自定义假期"
+        assert describe_source("custom_weekly_work") == "自定义每周执行日"
+        assert describe_source("custom_weekly_rest") == "自定义每周休息日"
+        assert describe_source("compensatory") == "调休上班日"
+        assert describe_source("builtin_holiday") == "节假日"
+
+    def test_describe_source_fallback_for_unnamed_sources(self) -> None:
+        """无名称来源（法定假日/周末等）应回退到主窗口旧版兜底文案。"""
+        assert describe_source("legal_holiday") == "国务院官方节假日"
+        assert describe_source("legal_workday") == "国务院官方节假日"
+        assert describe_source("weekday") == "国务院官方节假日"
+        assert describe_source("weekend") == "国务院官方节假日"
+
+    def test_rule_source_custom_overrides_compensatory(self, sample_config: dict[str, Any]) -> None:
+        """rule_source：自定义规则启用且当天为调休日，来源必须是自定义（优先级钉死）。"""
+        config = sample_config.copy()
+        # 2026-01-04 是周日且在 COMPENSATORY_WORKDAYS 中
+        config["COMPENSATORY_WORKDAYS"] = ["2026-01-04"]
+        config["DATE_RULES"] = {
+            "ENABLE_CUSTOM_RULE": True,
+            "WEEKLY_EXECUTE_DAYS": [6],  # 含周日 → custom_weekly_work
+            "CUSTOM_HOLIDAY_PERIODS": [],
+            "CUSTOM_WORKDAY_PERIODS": [],
+        }
+        global_config.clear()
+        global_config.update(config)
+
+        source, period = rule_source(datetime.date(2026, 1, 4))
+        assert source == "custom_weekly_work"
+        assert period is None
+        # 左卡片文案由 describe_source 派生，应来自自定义来源
+        assert describe_source(source) == "自定义每周执行日"
 
 
 class TestISPMapping:

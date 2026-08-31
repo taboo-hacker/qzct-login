@@ -18,6 +18,31 @@ _WORK_SOURCES = frozenset(
     {"custom_workday", "custom_weekly_work", "compensatory", "legal_workday", "weekday"}
 )
 
+# 来源标识 → 用户可读文案（与 rule_source 的返回值对应；法定假日/周末等
+# 无名称来源不在表中，由 describe_source 兜底翻译）。主窗口左卡片与
+# 万年历共用这一份映射，避免第三份私有实现导致优先级/文案漂移。
+SOURCE_TEXT: dict[str, str] = {
+    "custom_workday": "自定义工作日",
+    "custom_holiday": "自定义假期",
+    "custom_weekly_work": "自定义每周执行日",
+    "custom_weekly_rest": "自定义每周休息日",
+    "compensatory": "调休上班日",
+    "builtin_holiday": "节假日",
+}
+
+
+def describe_source(source: str) -> str:
+    """把 rule_source 返回的来源标识翻译为用户可读文案。
+
+    Args:
+        source: rule_source 返回的来源标识
+
+    Returns:
+        str: SOURCE_TEXT 中的文案；未知来源（legal_holiday/weekday 等
+        无名称来源）回退为"国务院官方节假日"（主窗口旧版兜底文案，保持兼容）
+    """
+    return SOURCE_TEXT.get(source, "国务院官方节假日")
+
 
 def _chinese_calendar_is_holiday(date: datetime.date) -> bool:
     """chinesecalendar 是否为法定假日。数据不可用时返回 False。

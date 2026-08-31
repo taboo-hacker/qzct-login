@@ -3,13 +3,17 @@ gui/main_window.py 冒烟测试
 
 MainWindow 构造需要加载配置、初始化日志与托盘，测试中全部打桩
 （patch load_config / init_logger / TrayManager），
-仅验证新布局下的关键控件存在、设置面板回显与状态徽标刷新流程。
+覆盖新布局下的关键控件存在、设置面板回显、状态徽标刷新、任务链
+结果报告、布防可见性、托盘通知分级、防重入时序、业务级忙标志
+与确认框默认按钮等场景。
 """
 
+import datetime
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock
 
 import pytest
 from pytestqt.qtbot import QtBot
@@ -348,6 +352,138 @@ class TestButtonsGuardAndCallbacks:
             assert main_window._test_executors == []
 
 
+class TestTaskBusyFlag:
+    """业务级忙标志与按钮禁用解耦：防重入守卫只读 _task_busy，不看控件状态。"""
+
+    def test_busy_flag_follows_buttons_toggle(self, main_window: "MainWindow") -> None:
+        """_set_buttons_enabled(False/True) 应同步置位/复位 _task_busy。"""
+        assert main_window._task_busy is False  # 初始空闲
+
+        main_window._set_buttons_enabled(False, busy_text="测试中...")
+        assert main_window._task_busy is True
+
+        main_window._set_buttons_enabled(True)
+        assert main_window._task_busy is False
+
+    def test_wifi_test_blocked_by_busy_flag_without_button_state(
+        self, main_window: "MainWindow"
+    ) -> None:
+        """手动置忙（按钮保持可用）时 WiFi 测试应直接忽略：不弹确认框、不建 executor。"""
+        from unittest.mock import patch
+
+        from core.config import global_config
+
+        global_config.update({"WIFI_NAME": "DormWiFi"})
+        main_window._task_busy = True  # 未经 _set_buttons_enabled，按钮仍可用
+        with (
+            patch("gui.main_window.QMessageBox.question") as mock_q,
+            patch("gui.main_window.is_wifi_connected") as mock_conn,
+        ):
+            main_window.on_test_wifi()
+            mock_q.assert_not_called()
+            mock_conn.assert_not_called()
+        assert main_window._test_executors == []
+        assert main_window.run_btn.isEnabled() is True  # 按钮状态未被牵连
+
+    def test_login_test_blocked_by_busy_flag_without_button_state(
+        self, main_window: "MainWindow"
+    ) -> None:
+        """手动置忙（按钮保持可用）时登录测试应直接忽略：不弹确认框、不建 executor。"""
+        from unittest.mock import patch
+
+        from core.config import global_config
+
+        global_config.update({"USERNAME": "20230101"})
+        main_window._task_busy = True
+        with (
+            patch("gui.main_window.QMessageBox.question") as mock_q,
+            patch("gui.main_window.campus_login") as mock_login,
+        ):
+            main_window.on_test_login()
+            mock_q.assert_not_called()
+            mock_login.assert_not_called()
+        assert main_window._test_executors == []
+
+    def test_cancel_shutdown_blocked_by_busy_flag_without_button_state(
+        self, main_window: "MainWindow"
+    ) -> None:
+        """手动置忙（按钮保持可用）时取消关机应弹"提示"信息框而非确认框。"""
+        from unittest.mock import patch
+
+        main_window._task_busy = True
+        with (
+            patch("gui.main_window.QMessageBox.information") as mock_info,
+            patch("gui.main_window.QMessageBox.question") as mock_q,
+        ):
+            main_window.on_cancel_shutdown()
+        mock_info.assert_called_once()
+        mock_q.assert_not_called()
+        assert main_window._test_executors == []
+        assert main_window.run_btn.isEnabled() is True
+
+
+class TestConfirmDialogDefaults:
+    """统一确认框 _confirm：各调用点的默认按钮语义与既有行为保持一致。"""
+
+    def test_run_once_confirm_defaults_to_no(self, main_window: "MainWindow") -> None:
+        """「立即执行」确认框默认聚焦"否"（危险操作，回车不直接放行）。"""
+        from unittest.mock import patch
+
+        from PySide6.QtWidgets import QMessageBox
+
+        no = QMessageBox.StandardButton.No
+        with (
+            patch("gui.main_window.QMessageBox.question", return_value=no) as mock_q,
+            patch.object(type(main_window), "start_task_chain") as mock_start,
+        ):
+            main_window.on_run_once()
+            mock_q.assert_called_once()
+            assert mock_q.call_args.args[4] is QMessageBox.StandardButton.No
+            mock_start.assert_not_called()
+
+    def test_wifi_test_confirm_defaults_to_yes(self, main_window: "MainWindow") -> None:
+        """「测试 WiFi」确认框默认"是"（非破坏性测试，维持既有隐式 Yes 行为）。"""
+        from unittest.mock import patch
+
+        from PySide6.QtWidgets import QMessageBox
+
+        from core.config import global_config
+
+        global_config.update({"WIFI_NAME": "DormWiFi"})
+        yes = QMessageBox.StandardButton.Yes
+        with (
+            patch("gui.main_window.QMessageBox.question", return_value=yes) as mock_q,
+            patch.object(main_window, "_run_background_test") as mock_run,
+        ):
+            main_window.on_test_wifi()
+            mock_q.assert_called_once()
+            assert mock_q.call_args.args[4] is QMessageBox.StandardButton.Yes
+            assert (
+                mock_q.call_args.args[3]
+                == QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            mock_run.assert_called_once()
+
+    def test_login_test_confirm_defaults_to_yes(self, main_window: "MainWindow") -> None:
+        """「测试登录」确认框默认"是"（非破坏性测试，维持既有隐式 Yes 行为）。"""
+        from unittest.mock import patch
+
+        from PySide6.QtWidgets import QMessageBox
+
+        from core.config import global_config
+
+        global_config.update({"USERNAME": "20230101"})
+        yes = QMessageBox.StandardButton.Yes
+        with (
+            patch("gui.main_window.QMessageBox.question", return_value=yes) as mock_q,
+            patch.object(main_window, "_run_background_test") as mock_run,
+        ):
+            main_window.on_test_login()
+            mock_q.assert_called_once()
+            assert mock_q.call_args.args[4] is QMessageBox.StandardButton.Yes
+            mock_run.assert_called_once()
+
+
 class TestCloseEvent:
     """关闭事件测试：强制退出走完整清理（恢复标准流、接受事件）。"""
 
@@ -381,3 +517,266 @@ class TestCloseEvent:
             main_window._real_close()
             mock_q.assert_called_once()
             mock_close.assert_not_called()
+
+
+def _tray_mock(window: "MainWindow") -> MagicMock:
+    """取主窗口被打桩的 TrayManager 替身（fixture 中 patch 类构造所得）。"""
+    return cast(MagicMock, window._tray)
+
+
+class TestChainErrorNotification:
+    """任务链异常终止可见性：托盘常驻形态下链级失败必须以 Critical 气泡可见。"""
+
+    def test_chain_error_notifies_tray_critical(self, main_window: "MainWindow") -> None:
+        """_on_chain_error 应弹 Critical 级托盘通知（窗口可能最小化在托盘中）。"""
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        tray = _tray_mock(main_window)
+        main_window._on_chain_error({"检查执行条件": {"error": "boom"}})
+        tray.notify.assert_called_once_with(
+            "任务链执行失败",
+            "任务链异常终止，定时关机未设置，详情见运行日志",
+            icon=QSystemTrayIcon.MessageIcon.Critical,
+        )
+
+
+class TestShutdownArmedVisibility:
+    """定时关机布防状态可见性：左卡片剩余时间 + 托盘状态同步。"""
+
+    def _success_results(self, seconds: int = 7200) -> dict[str, object]:
+        return {
+            "检查执行条件": {"need_work": True},
+            "连接WiFi": {"wifi_connected": True},
+            "登录校园网": {"login_successful": True},
+            "设置定时关机": {"shutdown_set": True, "seconds": seconds},
+        }
+
+    def test_armed_label_visible_after_chain_success(self, main_window: "MainWindow") -> None:
+        """链成功设置关机后左卡片应显示"已布防 · 剩 HH:MM:SS"。"""
+        main_window._on_chain_success(True, self._success_results(seconds=7200))
+        label = main_window.shutdown_armed_label
+        assert not label.isHidden()
+        assert "已布防" in label.text()
+        assert "剩" in label.text()
+        assert main_window._shutdown_deadline is not None
+        assert main_window._shutdown_deadline > datetime.datetime.now()
+
+    def test_armed_label_shows_expired_after_deadline(self, main_window: "MainWindow") -> None:
+        """截止时刻已过应显示"已到关机时间"（不显示负倒计时）。"""
+        main_window._shutdown_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+        main_window._update_shutdown_armed_display()
+        label = main_window.shutdown_armed_label
+        assert not label.isHidden()
+        assert label.text() == "已布防关机 · 已到关机时间"
+
+    def test_cancel_hides_armed_label(self, main_window: "MainWindow") -> None:
+        """取消关机成功后布防标签隐藏、截止时刻清空。"""
+        from unittest.mock import patch
+
+        main_window._on_chain_success(True, self._success_results(seconds=7200))
+        assert not main_window.shutdown_armed_label.isHidden()
+        with patch("gui.main_window.QMessageBox.information"):
+            main_window._on_cancel_shutdown_finished("cancel_shutdown", True)
+        assert main_window.shutdown_armed_label.isHidden()
+        assert main_window._shutdown_deadline is None
+        assert main_window._shutdown_scheduled is False
+
+    def test_tray_receives_armed_status(self, main_window: "MainWindow") -> None:
+        """布防后托盘 set_shutdown_status 应收到 armed=True 与剩余时间文案。"""
+        tray = _tray_mock(main_window)
+        main_window._on_chain_success(True, self._success_results(seconds=7200))
+        armed_calls = [
+            c for c in tray.set_shutdown_status.call_args_list if c.kwargs.get("armed") is True
+        ]
+        assert armed_calls, "托盘未收到 armed=True 状态更新"
+        detail = str(armed_calls[-1].kwargs.get("detail", ""))
+        assert detail.startswith("剩 ")
+
+    def test_tray_receives_disarmed_after_cancel(self, main_window: "MainWindow") -> None:
+        """取消关机后托盘应收到 armed=False。"""
+        from unittest.mock import patch
+
+        tray = _tray_mock(main_window)
+        main_window._on_chain_success(True, self._success_results(seconds=7200))
+        with patch("gui.main_window.QMessageBox.information"):
+            main_window._on_cancel_shutdown_finished("cancel_shutdown", True)
+        tray.set_shutdown_status.assert_called_with(armed=False, detail="")
+
+
+class TestCancelShutdownGuardOrder:
+    """取消关机防重入时序：检查必须先于确认框，命中时给用户可见反馈。"""
+
+    def test_busy_shows_information_instead_of_question(self, main_window: "MainWindow") -> None:
+        """任务执行中触发取消：弹"提示"信息框，且不再弹确认框。"""
+        from unittest.mock import patch
+
+        main_window._set_buttons_enabled(False, busy_text="运行中...")
+        with (
+            patch("gui.main_window.QMessageBox.information") as mock_info,
+            patch("gui.main_window.QMessageBox.question") as mock_q,
+        ):
+            main_window.on_cancel_shutdown()
+        mock_info.assert_called_once()
+        mock_q.assert_not_called()
+        # 未进入取消流程（不新建 executor）
+        assert main_window._test_executors == []
+
+
+class TestRuleSourceDisplay:
+    """左卡片规则来源显示：与 core.date_rules 唯一优先级阶梯一致。"""
+
+    def test_custom_rule_overrides_compensatory_text(self, main_window: "MainWindow") -> None:
+        """自定义规则启用 + 当天为调休日：应显示自定义来源而非"调休上班日"。
+
+        回归：旧版手写阶梯先查 COMPENSATORY_WORKDAYS，与 core 的
+        自定义规则最高优先级相反，导致左卡片与日历同屏矛盾。
+        """
+        from core.config import global_config
+
+        today = datetime.date.today()
+        global_config.update(
+            {
+                "COMPENSATORY_WORKDAYS": [today.isoformat()],
+                "DATE_RULES": {
+                    "ENABLE_CUSTOM_RULE": True,
+                    "WEEKLY_EXECUTE_DAYS": [today.weekday()],
+                    "CUSTOM_HOLIDAY_PERIODS": [],
+                    "CUSTOM_WORKDAY_PERIODS": [],
+                },
+            }
+        )
+        main_window._update_status_display()
+        text = main_window.rule_label.text()
+        assert "调休上班日" not in text
+        assert "自定义每周执行日" in text
+
+    def test_compensatory_text_when_custom_rule_disabled(self, main_window: "MainWindow") -> None:
+        """未启用自定义规则 + 当天为调休日：仍应显示"调休上班日"。"""
+        from core.config import global_config
+
+        today = datetime.date.today()
+        global_config.update(
+            {
+                "COMPENSATORY_WORKDAYS": [today.isoformat()],
+                "HOLIDAY_PERIODS": [],
+                "DATE_RULES": {
+                    "ENABLE_CUSTOM_RULE": False,
+                    "WEEKLY_EXECUTE_DAYS": [0, 1, 2, 3, 4],
+                    "CUSTOM_HOLIDAY_PERIODS": [],
+                    "CUSTOM_WORKDAY_PERIODS": [],
+                },
+            }
+        )
+        main_window._update_status_display()
+        assert "调休上班日" in main_window.rule_label.text()
+
+
+class TestMidnightStatusRefresh:
+    """常驻跨零点刷新：换天后"今日状态"卡片应随之更新。"""
+
+    def test_date_change_triggers_status_refresh(
+        self, main_window: "MainWindow", monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_shown_date 落后一天时调用 _update_time_display 应触发状态刷新。"""
+        calls: list[int] = []
+        monkeypatch.setattr(main_window, "_update_status_display", lambda: calls.append(1))
+
+        main_window._shown_date = datetime.date.today() - datetime.timedelta(days=1)
+        main_window._update_time_display()
+        assert calls == [1]
+        assert main_window._shown_date == datetime.date.today()
+
+        # 同一天内重复走秒不再刷新（避免无谓重绘）
+        calls.clear()
+        main_window._update_time_display()
+        assert calls == []
+
+
+class TestStartTaskChainWiring:
+    """任务链装配测试：WiFi 步骤应使用按配置动态估算的超时预算。"""
+
+    def test_wifi_step_uses_dynamic_timeout_budget(self, main_window: "MainWindow") -> None:
+        """task_connect_wifi 的 add 调用应带 timeout>0（estimate_wifi_retry_budget 结果）。"""
+        from unittest.mock import patch
+
+        from services.tasks import task_connect_wifi
+
+        with patch("gui.main_window.TaskChain") as mock_chain_cls:
+            chain = mock_chain_cls.return_value
+            main_window.start_task_chain()
+            wifi_calls = [
+                c for c in chain.add.call_args_list if c.args and c.args[0] is task_connect_wifi
+            ]
+            assert len(wifi_calls) == 1
+            timeout = wifi_calls[0].kwargs.get("timeout")
+            assert isinstance(timeout, int)
+            assert timeout >= 30  # estimate_wifi_retry_budget 恒 ≥ 30（固定余量）
+
+        # 清理真实创建的 executor，避免线程池泄漏
+        assert main_window.task_executor is not None
+        main_window.task_executor.cancel_all()
+        main_window.task_executor.shutdown(wait=False)
+
+
+class TestTrayNotifyLevels:
+    """托盘通知分级：失败路径传 Warning，成功路径保持默认 Information。"""
+
+    def test_partial_failure_notifies_warning(self, main_window: "MainWindow") -> None:
+        """链完成但 success=False（部分任务失败）应以 Warning 图标通知。"""
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        tray = _tray_mock(main_window)
+        main_window._on_chain_success(False, {})
+        tray.notify.assert_called_once_with(
+            "校园网自动登录",
+            "部分任务执行失败，请查看日志",
+            icon=QSystemTrayIcon.MessageIcon.Warning,
+        )
+
+    def test_failure_summary_notifies_warning(self, main_window: "MainWindow") -> None:
+        """存在失败步骤的摘要通知应以 Warning 图标发出。"""
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        tray = _tray_mock(main_window)
+        results = {
+            "检查执行条件": {"need_work": True},
+            "连接WiFi": {"wifi_connected": False},
+            "登录校园网": {"login_successful": True},
+            "设置定时关机": {"shutdown_set": True, "seconds": 3600},
+        }
+        main_window._on_chain_success(True, results)
+        tray.notify.assert_called_once_with(
+            "校园网自动登录",
+            "WiFi 连接失败；已设置 23:00 定时关机，详情见运行日志",
+            icon=QSystemTrayIcon.MessageIcon.Warning,
+        )
+
+    def test_success_path_keeps_default_information(self, main_window: "MainWindow") -> None:
+        """全部成功路径不显式传 icon（保持默认 Information）。"""
+        tray = _tray_mock(main_window)
+        results = {
+            "检查执行条件": {"need_work": True},
+            "连接WiFi": {"wifi_connected": True},
+            "登录校园网": {"login_successful": True},
+            "设置定时关机": {"shutdown_set": True, "seconds": 3600},
+        }
+        main_window._on_chain_success(True, results)
+        tray.notify.assert_called_once()  # 单次成功通知，无 icon 覆盖
+        assert "icon" not in tray.notify.call_args.kwargs
+
+
+class TestFooterTooltip:
+    """footer 长文案测试：_set_footer 同步 tooltip，截断文案悬停可读。"""
+
+    def test_set_footer_sets_text_and_tooltip(self, main_window: "MainWindow") -> None:
+        """_set_footer 应同时写文本与 tooltip。"""
+        long_text = "WiFi 连接、校园网登录失败；已设置 23:00 定时关机，详情见运行日志"
+        main_window._set_footer(long_text)
+        assert main_window.footer_status.text() == long_text
+        assert main_window.footer_status.toolTip() == long_text
+
+    def test_chain_error_footer_has_tooltip(self, main_window: "MainWindow") -> None:
+        """链失败文案经 _set_footer 写入后应带同名 tooltip。"""
+        main_window._on_chain_error({})
+        assert main_window.footer_status.text() == "任务链执行失败"
+        assert main_window.footer_status.toolTip() == "任务链执行失败"

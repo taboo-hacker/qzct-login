@@ -7,11 +7,17 @@ QtLogSink：loguru -> GUI 控件的日志桥接，重点验证跨线程 Signal �
 （QueuedConnection）与启动期无控件时的缓冲逻辑。
 """
 
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
+
 from PySide6.QtWidgets import QApplication, QTextEdit, QWidget
 from pytestqt.qtbot import QtBot
 
 from gui.log_sink import QtLogSink
 from tests.conftest import ensure_qapp as _ensure_qapp
+
+if TYPE_CHECKING:
+    from gui.tray_manager import TrayManager
 
 # =====================================================================
 # TrayManager
@@ -168,6 +174,177 @@ class TestTrayManager:
         with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
             tm = TrayManager(parent)
             tm._on_quit()
+
+
+class TestTrayManagerNotifyLevels:
+    """notify 分级测试：默认 Information，显式 icon 参数透传给 showMessage。"""
+
+    def _make_tray_with_mock_icon(self, qtbot: QtBot) -> "tuple[TrayManager, MagicMock]":
+        """构造可用托盘管理器，图标替换为 MagicMock 便于断言 showMessage。"""
+        from unittest.mock import patch
+
+        from gui.tray_manager import TrayManager
+
+        parent = QWidget()
+        qtbot.addWidget(parent)
+        with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
+            tm = TrayManager(parent)
+        icon = MagicMock()
+        icon.isVisible.return_value = True
+        tm._tray_icon = icon
+        return tm, icon
+
+    def test_notify_defaults_to_information(self, qtbot: QtBot) -> None:
+        """不传 icon 时应以 Information 图标弹出（成功路径默认级别）。"""
+        _ensure_qapp()
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        tm, icon = self._make_tray_with_mock_icon(qtbot)
+        tm.notify("Title", "Message")
+        icon.showMessage.assert_called_once_with(
+            "Title", "Message", QSystemTrayIcon.MessageIcon.Information, 3000
+        )
+
+    def test_notify_passes_warning_icon(self, qtbot: QtBot) -> None:
+        """显式传 Warning 时应透传给 showMessage（失败与成功可区分）。"""
+        _ensure_qapp()
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        tm, icon = self._make_tray_with_mock_icon(qtbot)
+        tm.notify("Title", "Message", icon=QSystemTrayIcon.MessageIcon.Warning)
+        icon.showMessage.assert_called_once_with(
+            "Title", "Message", QSystemTrayIcon.MessageIcon.Warning, 3000
+        )
+
+    def test_notify_passes_critical_icon(self, qtbot: QtBot) -> None:
+        """显式传 Critical 时应透传给 showMessage（链级失败最高级别）。"""
+        _ensure_qapp()
+        from PySide6.QtWidgets import QSystemTrayIcon
+
+        tm, icon = self._make_tray_with_mock_icon(qtbot)
+        tm.notify("Title", "Message", icon=QSystemTrayIcon.MessageIcon.Critical)
+        icon.showMessage.assert_called_once_with(
+            "Title", "Message", QSystemTrayIcon.MessageIcon.Critical, 3000
+        )
+
+
+class TestTrayShutdownStatus:
+    """托盘布防状态测试：tooltip 与"取消定时关机"菜单项随 armed 切换。"""
+
+    def _make_tray_with_mocks(self, qtbot: QtBot) -> "tuple[TrayManager, MagicMock, MagicMock]":
+        """构造可用托盘管理器，图标与菜单 action 均替换为 MagicMock。"""
+        from unittest.mock import patch
+
+        from gui.tray_manager import TrayManager
+
+        parent = QWidget()
+        qtbot.addWidget(parent)
+        with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
+            tm = TrayManager(parent)
+        icon = MagicMock()
+        icon.isVisible.return_value = True
+        tm._tray_icon = icon
+        action = MagicMock()
+        tm._cancel_shutdown_action = action
+        return tm, icon, action
+
+    def test_armed_updates_tooltip_and_shows_menu_action(self, qtbot: QtBot) -> None:
+        """armed=True：tooltip 追加布防标记与剩余时间，菜单项可见。"""
+        _ensure_qapp()
+        tm, icon, action = self._make_tray_with_mocks(qtbot)
+        tm.set_shutdown_status(armed=True, detail="剩 02:31:23")
+        icon.setToolTip.assert_called_with("校园网自动登录 · 已布防关机（剩 02:31:23）")
+        action.setVisible.assert_called_with(True)
+
+    def test_armed_without_detail_omits_parenthesis(self, qtbot: QtBot) -> None:
+        """armed=True 且 detail 为空：tooltip 不追加空括号。"""
+        _ensure_qapp()
+        tm, icon, _action = self._make_tray_with_mocks(qtbot)
+        tm.set_shutdown_status(armed=True)
+        icon.setToolTip.assert_called_with("校园网自动登录 · 已布防关机")
+
+    def test_disarmed_restores_tooltip_and_hides_menu_action(self, qtbot: QtBot) -> None:
+        """armed=False：tooltip 还原静态文案，菜单项隐藏。"""
+        _ensure_qapp()
+        tm, icon, action = self._make_tray_with_mocks(qtbot)
+        tm.set_shutdown_status(armed=False)
+        icon.setToolTip.assert_called_with("校园网自动登录")
+        action.setVisible.assert_called_with(False)
+
+    def test_set_shutdown_status_noop_without_tray(self, qtbot: QtBot) -> None:
+        """托盘不可用（_tray_icon=None）时布防状态更新应安全 no-op。"""
+        _ensure_qapp()
+        from gui.tray_manager import TrayManager
+
+        # 绕过 __init__ 手工构造半成品对象，模拟"托盘初始化失败"状态
+        tm = TrayManager.__new__(TrayManager)
+        tm._parent = QWidget()
+        tm._tray_icon = None
+        tm._cancel_shutdown_action = None
+        tm.set_shutdown_status(armed=True, detail="剩 01:00:00")  # 不崩溃即通过
+
+
+class TestTrayCancelShutdownMenu:
+    """托盘菜单测试：「取消定时关机」入口的位置、初始可见性与触发接线。"""
+
+    def test_menu_contains_cancel_action_between_show_and_quit(self, qtbot: QtBot) -> None:
+        """菜单应含"取消定时关机"，位于"显示主窗口"与"退出"之间且初始不可见。"""
+        _ensure_qapp()
+        from unittest.mock import patch
+
+        from gui.tray_manager import TrayManager
+
+        parent = QWidget()
+        qtbot.addWidget(parent)
+
+        with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
+            tm = TrayManager(parent)
+        assert tm._tray_icon is not None
+        menu = tm._tray_icon.contextMenu()
+        assert menu is not None
+        texts = [action.text() for action in menu.actions()]
+        assert texts.index("显示主窗口") < texts.index("取消定时关机") < texts.index("退出")
+        assert tm._cancel_shutdown_action is not None
+        assert tm._cancel_shutdown_action.isVisible() is False
+
+    def test_cancel_action_triggers_parent_callback(self, qtbot: QtBot) -> None:
+        """触发菜单 action 应反射调用 parent.on_cancel_shutdown。"""
+        _ensure_qapp()
+        from unittest.mock import patch
+
+        from gui.tray_manager import TrayManager
+
+        class FakeMainWidget(QWidget):
+            """带 on_cancel_shutdown 契约方法的 MainWindow 测试替身。"""
+
+            cancel_calls: int = 0
+
+            def on_cancel_shutdown(self) -> None:
+                self.cancel_calls += 1
+
+        parent = FakeMainWidget()
+        qtbot.addWidget(parent)
+
+        with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
+            tm = TrayManager(parent)
+        assert tm._cancel_shutdown_action is not None
+        tm._cancel_shutdown_action.trigger()
+        assert parent.cancel_calls == 1
+
+    def test_cancel_action_without_parent_callback_noop(self, qtbot: QtBot) -> None:
+        """parent 未提供 on_cancel_shutdown 时触发也不崩溃。"""
+        _ensure_qapp()
+        from unittest.mock import patch
+
+        from gui.tray_manager import TrayManager
+
+        parent = QWidget()
+        qtbot.addWidget(parent)
+
+        with patch("gui.tray_manager.QSystemTrayIcon.isSystemTrayAvailable", return_value=True):
+            tm = TrayManager(parent)
+        assert tm._cancel_shutdown_action is not None
+        tm._cancel_shutdown_action.trigger()
 
 
 # =====================================================================
