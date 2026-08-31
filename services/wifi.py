@@ -20,6 +20,11 @@ from infra.logging import error, info
 # 取消检查回调：返回 True 表示任务已被取消。用于长循环/睡眠中的协作式取消。
 CancelCheck = Callable[[], bool] | None
 
+# 重试指数退避的延迟上限（秒）：与 NETSH_TIMEOUT_SEC 同为耗时估算的数据源
+WIFI_BACKOFF_CAP_SEC = 60
+# 发起 netsh connect 后等待连接稳定的时长（秒），见 _do_connect_wifi
+WIFI_STABLE_WAIT_SEC = 5
+
 
 def interruptible_sleep(seconds: float, should_cancel: CancelCheck = None) -> bool:
     """可中断的睡眠：分片 sleep 并轮询取消标志。
@@ -205,7 +210,7 @@ def _do_connect_wifi(wifi_name: str, password: str, should_cancel: CancelCheck =
     )
 
     info("services.wifi", "等待WiFi连接稳定...")
-    if not interruptible_sleep(5, should_cancel):
+    if not interruptible_sleep(WIFI_STABLE_WAIT_SEC, should_cancel):
         raise WiFiConnectionError(f"WiFi 连接已取消：{wifi_name}")
 
     if not is_wifi_connected(wifi_name):
@@ -265,7 +270,10 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None, should_cancel: CancelCh
     retry_interval = cfg.get("RETRY_INTERVAL", 5)
 
     # 未配置 WiFi 名称（如仅用有线 + 校园网认证的用户）时直接跳过：
-    # 连空 SSID 毫无意义，重试 10 次只会白白拖慢任务链约两分钟
+    # 连空 SSID 毫无意义，重试 10 次只会白白拖慢任务链约两分钟。
+    # 注意：这里是"兜底"守卫（返回 False）；tasks.task_connect_wifi 还有对应的
+    # 前置守卫（返回 wifi_connected=None 表示"跳过不算失败"）。两层语义耦合，
+    # 删除 tasks 层守卫会让"未配置"被本层当成连接失败上报，改变链结果语义
     if not wifi_name:
         info("services.wifi", "未配置 WiFi 名称，跳过 WiFi 连接（可在设置中填写）")
         return False
@@ -293,8 +301,8 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None, should_cancel: CancelCh
             return True
 
         if retry_count < max_retry:
-            # 指数退避：1s → 2s → 4s → 8s → ... 上限 60s
-            delay = min(retry_interval * (2 ** (retry_count - 1)), 60)
+            # 指数退避：1s → 2s → 4s → 8s → ... 上限 WIFI_BACKOFF_CAP_SEC
+            delay = min(retry_interval * (2 ** (retry_count - 1)), WIFI_BACKOFF_CAP_SEC)
             info("services.wifi", f"等待{delay}秒后重试...")
             if not interruptible_sleep(delay, should_cancel):
                 info("services.wifi", "WiFi 自动连接已取消", exc_info=False)
@@ -302,3 +310,39 @@ def auto_connect_wifi(cfg: dict[str, Any] | None = None, should_cancel: CancelCh
 
     error("services.wifi", f"超过{max_retry}次重试，WiFi连接失败", exc_info=False)
     return False
+
+
+def estimate_wifi_retry_budget(cfg: dict[str, Any] | None = None) -> int:
+    """估算 auto_connect_wifi 最坏耗时（秒），供任务链装配时设置超时预算。
+
+    公式（与 auto_connect_wifi / _do_connect_wifi 的实现保持同一数据源）：
+
+        backoff  = sum(min(retry_interval * 2**(i-1), WIFI_BACKOFF_CAP_SEC)
+                       for i in 1..max_retry-1)        # 每次失败尝试后的指数退避
+        attempts = max_retry * (5 * NETSH_TIMEOUT_SEC + WIFI_STABLE_WAIT_SEC)
+                   # 每次尝试最坏 5 次 netsh 调用（循环入口状态查询/profile 查询/
+                   # 导入 profile/发起连接/连接后验证，各 NETSH_TIMEOUT_SEC）
+                   # + 稳定等待 WIFI_STABLE_WAIT_SEC
+        budget   = backoff + attempts + 30             # 30s 固定余量
+
+    用途：task_connect_wifi 不再使用静态超时（用户可配的重试参数不同，
+    静态值要么误杀长重试链、要么形同虚设）；gui/main_window.start_task_chain
+    装配链时调用本函数，把结果经 TaskChain.add(timeout=...) 覆盖该步超时。
+
+    Args:
+        cfg: 配置字典快照，None 时取 get_config_snapshot()
+
+    Returns:
+        int: 最坏情况耗时估算（秒），恒 ≥ 30（固定余量）
+    """
+    if cfg is None:
+        cfg = get_config_snapshot()
+    max_retry = cfg.get("MAX_WIFI_RETRY", 10)
+    retry_interval = cfg.get("RETRY_INTERVAL", 5)
+
+    backoff = sum(
+        min(retry_interval * (2 ** (i - 1)), WIFI_BACKOFF_CAP_SEC)
+        for i in range(1, max(1, int(max_retry)))
+    )
+    attempts = int(max_retry) * (5 * NETSH_TIMEOUT_SEC + WIFI_STABLE_WAIT_SEC)
+    return int(backoff + attempts + 30)

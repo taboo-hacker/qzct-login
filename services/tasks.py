@@ -48,17 +48,25 @@ def task_check_condition(
     return {"need_work": True, "date": today}
 
 
-@task("连接WiFi", timeout=120)
+@task("连接WiFi")
 def task_connect_wifi(ctx: TaskContext) -> dict[str, Any]:
     """步骤 2：自动连接配置的 WiFi（含重试 + 指数退避，可协作取消）。
 
-    超时给到 120s：最大重试 10 次 × 退避间隔（1+2+4+...封顶 60s）下
-    最坏情况接近两分钟。未配置 WiFi（有线用户）返回 wifi_connected=None
-    表示"跳过"，与连接失败（False）区分，供完成回调如实汇总。
+    本步骤不设静态超时：超时预算由链装配方按 estimate_wifi_retry_budget()
+    动态计算并经 TaskChain.add(..., timeout=...) 覆盖（见
+    gui/main_window.start_task_chain）——重试次数/间隔是用户可配参数，
+    静态值要么在长重试链上误杀本步骤（连带的登录/设关机被跳过），
+    要么对短配置形同虚设。
+
+    未配置 WiFi（有线用户）返回 wifi_connected=None 表示"跳过不算失败"，
+    与连接失败（False）区分，供完成回调如实汇总。
     """
     ctx.log("开始连接WiFi网络")
 
     cfg = get_config_snapshot()
+    # 前置守卫：None 表示"跳过不算失败"；services.wifi.auto_connect_wifi 对
+    # 同一条件另有兜底守卫（返回 False）。两层语义耦合——删除本层守卫会让
+    # "未配置"被 wifi 层当成连接失败上报，改变链结果的汇总语义
     if not cfg.get("WIFI_NAME", ""):
         ctx.log("未配置 WiFi 名称，跳过 WiFi 连接（可在设置中填写）")
         return {"wifi_connected": None, "reason": "not_configured"}

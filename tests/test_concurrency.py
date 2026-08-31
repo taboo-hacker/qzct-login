@@ -14,6 +14,7 @@ import threading
 import time
 from typing import Any
 
+import pytest
 from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
@@ -430,3 +431,121 @@ class TestTaskChainExecute:
             time.sleep(0.05)
         # 未崩溃即通过；完成回调不应触发（链信号已断开）
         assert not done.is_set()
+
+
+class TestTimeoutOverride:
+    """链级超时覆盖测试：TaskChain.add(timeout=...) / submit(timeout_override=...)
+    覆盖 @task 装饰器的静态超时，以及限时任务与单线程池的互斥守卫（回归 F01/F20）。"""
+
+    def test_chain_timeout_override_triggers_error(self, qtbot: QtBot) -> None:
+        """add(timeout=0.2) 覆盖 func.timeout=30：超期后链以 error 结束且 error_msg 含"超时"。"""
+        _ensure_qapp()
+
+        @task("限时任务", timeout=30)
+        def timed_step(ctx: TaskContext) -> dict:
+            # 分片睡眠并轮询取消标志：超时触发后 ctx.cancel() 令任务尽快退出，
+            # 不让测试工作线程真的睡满 5s
+            deadline = time.time() + 5
+            while time.time() < deadline and not ctx.is_cancelled():
+                time.sleep(0.05)
+            return {"done": True}
+
+        done = threading.Event()
+        captured: dict[str, Any] = {}
+
+        def on_error(results: dict[str, Any]) -> None:
+            captured["results"] = results
+            done.set()
+
+        chain = TaskChain().add(timed_step, "限时任务", timeout=0.2).on_error(on_error)
+
+        executor = chain.execute()
+
+        assert executor is not None
+        try:
+            elapsed = 0.0
+            while not done.is_set() and elapsed < 10.0:
+                QApplication.processEvents()
+                time.sleep(0.05)
+                elapsed += 0.05
+
+            assert done.is_set(), "on_error 回调未在超时内触发"
+            results = captured["results"]
+            assert "限时任务" in results
+            assert "超时" in results["限时任务"]["error"]
+        finally:
+            executor.shutdown(wait=False)
+
+    def test_chain_timeout_none_override_disables_timeout(self, qtbot: QtBot) -> None:
+        """add(timeout=None) 显式不限时：覆盖 func.timeout=0.1，慢任务（0.5s）仍成功。"""
+        _ensure_qapp()
+
+        @task("慢任务", timeout=0.1)
+        def slow_step(ctx: TaskContext) -> dict:
+            time.sleep(0.5)
+            return {"done": True}
+
+        done = threading.Event()
+        captured: dict[str, Any] = {}
+
+        def on_success(success: bool, results: dict[str, Any]) -> None:
+            captured["success"] = success
+            captured["results"] = results
+            done.set()
+
+        chain = TaskChain().add(slow_step, "慢任务", timeout=None).on_success(on_success)
+
+        executor = chain.execute()
+
+        assert executor is not None
+        try:
+            elapsed = 0.0
+            while not done.is_set() and elapsed < 10.0:
+                QApplication.processEvents()
+                time.sleep(0.05)
+                elapsed += 0.05
+
+            assert done.is_set(), "on_success 回调未在超时内触发"
+            assert captured["success"] is True
+            assert captured["results"]["慢任务"]["done"] is True
+        finally:
+            executor.shutdown(wait=False)
+
+    def test_submit_timed_task_to_single_worker_pool_raises(self) -> None:
+        """限时任务提交到 max_workers=1 线程池应同步 raise RuntimeError（F20 守卫）。"""
+        executor = TaskExecutor(max_workers=1)
+
+        @task("限时任务", timeout=10)
+        def timed_task(ctx: TaskContext) -> dict:
+            return {}
+
+        with pytest.raises(RuntimeError, match="2 个工作线程"):
+            executor.submit(timed_task, "限时任务")
+        executor.shutdown(wait=False)
+
+    def test_chain_timed_task_with_single_worker_ends_with_error(self, qtbot: QtBot) -> None:
+        """max_workers=1 的链上提交限时任务：守卫异常被捕获，链以 error 结束而非逃逸。"""
+        _ensure_qapp()
+
+        @task("限时步骤", timeout=10)
+        def timed_step(ctx: TaskContext) -> dict:
+            return {"done": True}
+
+        done = threading.Event()
+        captured: dict[str, Any] = {}
+
+        def on_error(results: dict[str, Any]) -> None:
+            captured["results"] = results
+            done.set()
+
+        executor = TaskExecutor(max_workers=1)
+        chain = TaskChain().add(timed_step, "限时步骤").on_error(on_error)
+        chain.execute(executor)
+
+        # 守卫在 _execute_chain_next 内同步触发并按失败终止链，
+        # 回调无需事件循环泵即应已完成
+        assert done.is_set()
+        results = captured["results"]
+        assert "限时步骤" in results
+        assert "线程池" in results["限时步骤"]["error"]
+        executor.shutdown(wait=False)

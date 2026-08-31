@@ -37,6 +37,10 @@ from PySide6.QtCore import QObject, Signal
 # （典型场景：task_check_condition 判定今天无需执行 → 跳过 WiFi/登录/关机）
 CHAIN_BREAK_KEY = "chain_break"
 
+# submit 的 timeout_override / TaskChain.add 的 timeout 的"未传"哨兵：
+# 用于区分"未提供参数（回退 func.timeout）"与"显式传入 None（明确不限时）"
+_NO_OVERRIDE: Any = object()
+
 
 class TaskContext:
     """任务运行上下文 —— 每个提交到 TaskExecutor 的任务各持有一个。
@@ -89,6 +93,11 @@ class TaskExecutor(QObject):
         started(task_name)              任务开始执行
         finished(task_name, result)     任务成功，result 为任务返回值
         error(task_name, error_msg)     任务抛出异常
+
+    超时与线程数的约束：限时任务（func 带 timeout 属性或 submit 传入
+    timeout_override）需要占用 2 个工作线程（外层等待 + 内层执行），
+    提交到 max_workers<=1 的线程池会同步抛 RuntimeError（链式路径
+    会捕获并按步骤失败优雅终止链，见 _execute_chain_next）。
     """
 
     started = Signal(str)
@@ -130,7 +139,12 @@ class TaskExecutor(QObject):
         return sum(1 for f in tasks if not f.done())
 
     def submit(
-        self, func: Callable[..., Any], task_name: str = "Unknown", *args: Any, **kwargs: Any
+        self,
+        func: Callable[..., Any],
+        task_name: str = "Unknown",
+        *args: Any,
+        timeout_override: Any = _NO_OVERRIDE,
+        **kwargs: Any,
     ) -> Future[Any]:
         """提交单个任务到线程池执行。
 
@@ -140,12 +154,31 @@ class TaskExecutor(QObject):
         Args:
             func: 任务函数，首参为 TaskContext
             task_name: 任务显示名（同名任务自动追加 _2/_3 序号避免冲突）
+            timeout_override: 覆盖 func.timeout 属性的超时秒数（链级超时预算，
+                见 TaskChain.add）；未传（默认哨兵）时回退 func.timeout，
+                显式传 None 表示该次提交不限时
             *args/**kwargs: 透传给任务函数的其余参数
 
         Returns:
             外层 Future —— 完成即代表信号已发出，不携带任务返回值；
             任务结果请通过 finished 信号获取。
+
+        Raises:
+            RuntimeError: 任务带超时（属性或覆盖值）但线程池 max_workers<=1 ——
+                限时执行需要外层等待 + 内层执行共 2 个工作线程，单线程池会
+                互相等待致死锁。链式路径会捕获并按步骤失败优雅终止链。
         """
+        # timeout_override 显式传入时覆盖 func 自身的 timeout 属性
+        timeout_val = (
+            getattr(func, "timeout", None) if timeout_override is _NO_OVERRIDE else timeout_override
+        )
+
+        if timeout_val is not None and self._max_workers <= 1:
+            raise RuntimeError(
+                "限时任务需要占用 2 个工作线程（外层等待 + 内层执行），"
+                "不能提交到 max_workers<=1 的线程池"
+            )
+
         ctx = TaskContext(task_name)
 
         with self._lock:
@@ -166,8 +199,6 @@ class TaskExecutor(QObject):
 
         def wrapped() -> None:
             try:
-                # 检查任务是否有 timeout 属性
-                timeout_val = getattr(func, "timeout", None)
                 if timeout_val is not None:
                     # 使用 future.result(timeout=...) 实现超时
                     inner_future = self._executor.submit(func, ctx, *args, **kwargs)
@@ -239,7 +270,8 @@ class TaskExecutor(QObject):
         """执行顺序任务链。
 
         Args:
-            steps: 任务步骤列表，每项为 {"func", "name", "args", "kwargs"}。
+            steps: 任务步骤列表，每项为 {"func", "name", "args", "kwargs"}，
+                可选 "timeout_override" 键（透传给 submit 覆盖该步超时）。
             on_complete: 完成回调，签名为 (success: bool, results: Dict)。
         """
         if self._chain_active:
@@ -275,11 +307,18 @@ class TaskExecutor(QObject):
 
         step = self._chain_steps[self._chain_index]
         try:
-            self.submit(step["func"], step["name"], *step["args"], **step["kwargs"])
-        except RuntimeError:
-            # 线程池已被关闭（如主窗口退出/链被中止）：按失败终止链，
-            # 不能让异常逃逸出 Qt 槽（PySide6 会直接 abort 进程）
-            self._chain_results[step["name"]] = {"error": "线程池已关闭，无法提交任务"}
+            self.submit(
+                step["func"],
+                step["name"],
+                *step["args"],
+                timeout_override=step.get("timeout_override", _NO_OVERRIDE),
+                **step["kwargs"],
+            )
+        except RuntimeError as e:
+            # submit 抛 RuntimeError（线程池已关闭 / 限时任务提交到 max_workers<=1
+            # 的池）：按失败终止链，不能让异常逃逸出 Qt 槽（PySide6 会 abort 进程）；
+            # 原始消息并入结果，避免把两种原因都误报成"线程池已关闭"
+            self._chain_results[step["name"]] = {"error": f"任务提交失败：{e}"}
             self._finish_chain(False)
 
     def _finish_chain(self, success: bool) -> None:
@@ -329,6 +368,11 @@ def task(name: str, timeout: float | None = None) -> Callable[..., Any]:
     - timeout 生效机制：TaskExecutor.submit 读取 wrapper.timeout 属性，
       用 inner_future.result(timeout=...) 等待；超时后置 ctx 取消标志
       （协作式，任务函数需自行检查）并取消排队中的 future。
+    - 限时任务需要线程池 max_workers>=2（外层等待 + 内层执行各占一个
+      工作线程），提交到 max_workers<=1 的池会抛 RuntimeError；
+    - 超时可被链装配时覆盖：TaskChain.add(..., timeout=...) /
+      TaskExecutor.submit(..., timeout_override=...) 优先于本装饰器的
+      静态 timeout（用于按配置动态计算的超时预算，None 表示不限时）。
 
     Args:
         name: 任务显示名（出现在信号与链结果字典的键中）
@@ -379,16 +423,29 @@ class TaskChain:
         self._executor: TaskExecutor | None = None
 
     def add(
-        self, func: Callable[..., Any], name: str | None = None, *args: Any, **kwargs: Any
+        self,
+        func: Callable[..., Any],
+        name: str | None = None,
+        *args: Any,
+        timeout: float | int | None = _NO_OVERRIDE,
+        **kwargs: Any,
     ) -> "TaskChain":
         """追加一个步骤到链尾（支持链式调用）。
 
         Args:
             func: 任务函数（首参为 TaskContext；通常用 @task 装饰）
             name: 步骤名，缺省取 func.task_name（即 @task 的名字）
+            timeout: 覆盖该步骤的超时秒数（float|int），显式传 None 表示该步
+                不限时；缺省（哨兵）不写入步骤、沿用 func.timeout 属性。
+                典型用途：动态超时预算（如 estimate_wifi_retry_budget 的结果）
+                覆盖 @task 装饰器的静态 timeout
+            *args/**kwargs: 透传给任务函数的其余参数
         """
         task_name = name or getattr(func, "task_name", f"Step-{len(self._steps)}")
-        self._steps.append({"func": func, "name": task_name, "args": args, "kwargs": kwargs})
+        step: dict[str, Any] = {"func": func, "name": task_name, "args": args, "kwargs": kwargs}
+        if timeout is not _NO_OVERRIDE:
+            step["timeout_override"] = timeout
+        self._steps.append(step)
         return self
 
     def on_success(self, callback: Callable[[bool, dict[str, Any]], None]) -> "TaskChain":

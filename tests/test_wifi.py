@@ -19,6 +19,7 @@ from services.wifi import (
     auto_connect_wifi,
     connect_wifi,
     create_windows_wifi_profile,
+    estimate_wifi_retry_budget,
     is_wifi_connected,
 )
 
@@ -327,3 +328,37 @@ class TestAutoConnectWifi:
             mock_conn.assert_not_called()
             mock_connect.assert_not_called()
             mock_sleep.assert_not_called()
+
+
+class TestEstimateWifiRetryBudget:
+    """estimate_wifi_retry_budget 测试：超时预算覆盖重试最坏耗时（回归 F01）。
+
+    全部用关系断言（≥/单调）而非精确值：公式含固定余量 30s，
+    钉死精确值会让公式微调（如调整余量）时误报。
+    """
+
+    def test_default_config_budget_covers_worst_case(self) -> None:
+        """默认配置（MAX_WIFI_RETRY=10, RETRY_INTERVAL=5）预算 ≥ 退避 375s + 10×80s 尝试。"""
+        budget = estimate_wifi_retry_budget({"MAX_WIFI_RETRY": 10, "RETRY_INTERVAL": 5})
+        # 退避总和 5+10+20+40+60×5=375；每次尝试最坏 5×15+5=80s
+        # （循环入口状态查询/profile 查询/导入/发起连接/连接后验证共 5 次 netsh）
+        assert budget >= 375 + 10 * 80
+
+    def test_zero_retry_budget_is_small(self) -> None:
+        """max_retry=0 时无退避与尝试耗时，仅剩固定余量（30 ≤ 预算 < 60）。"""
+        budget = estimate_wifi_retry_budget({"MAX_WIFI_RETRY": 0, "RETRY_INTERVAL": 5})
+        assert 30 <= budget < 60
+
+    def test_budget_monotonic_in_max_retry(self) -> None:
+        """预算随 max_retry 单调不减（增大重试次数不会算出更小的预算）。"""
+        prev = estimate_wifi_retry_budget({"MAX_WIFI_RETRY": 0, "RETRY_INTERVAL": 5})
+        for max_retry in range(1, 13):
+            current = estimate_wifi_retry_budget({"MAX_WIFI_RETRY": max_retry, "RETRY_INTERVAL": 5})
+            assert current >= prev
+            prev = current
+
+    def test_budget_uses_config_snapshot_when_none(self) -> None:
+        """cfg=None 时应改从 get_config_snapshot 读取重试参数（与显式传参同结果）。"""
+        snapshot = {"MAX_WIFI_RETRY": 2, "RETRY_INTERVAL": 3}
+        with patch("services.wifi.get_config_snapshot", return_value=snapshot):
+            assert estimate_wifi_retry_budget(None) == estimate_wifi_retry_budget(snapshot)
