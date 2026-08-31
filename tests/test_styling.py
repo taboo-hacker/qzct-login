@@ -283,3 +283,80 @@ class TestButtonQssIntegration:
         # 原文以转义形式进入 HTML 源码，而不是被解释为标签
         assert "&lt;b&gt;" in edit.toHtml()
         assert "<b>bold</b> & <i>x</i>" in edit.toPlainText()
+
+
+def _relative_luminance(hex_color: str) -> float:
+    """WCAG 相对亮度：sRGB 通道线性化后按 0.2126/0.7152/0.0722 加权。"""
+    value = hex_color.lstrip("#")
+    channels = [int(value[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast_ratio(fg: str, bg: str) -> float:
+    """WCAG 对比度：(L1+0.05)/(L2+0.05)，L1 为较亮一方。"""
+    lighter, darker = sorted((_relative_luminance(fg), _relative_luminance(bg)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+class TestPrimaryFgContrast:
+    """primary_fg 对比度回归测试（UX-06）：彩色前景文字对实际背景 ≥ WCAG AA。"""
+
+    def test_dark_primary_fg_meets_aa_on_tab_and_card_backgrounds(self) -> None:
+        """暗色 primary_fg 对 tab 背景（window_bg）与卡片背景均应 ≥ 4.5:1。"""
+        from gui.styling.themes import create_dark_theme
+
+        dark = create_dark_theme()
+        assert _contrast_ratio(dark.primary_fg, dark.window_bg) >= 4.5
+        assert _contrast_ratio(dark.primary_fg, dark.card_bg) >= 4.5
+
+    def test_dark_primary_fg_meets_aa_on_outline_hover_background(self) -> None:
+        """暗色 outline 按钮 hover 底（primary_bg）上的 primary_fg 也应 ≥ 4.5:1。"""
+        from gui.styling.themes import create_dark_theme
+
+        dark = create_dark_theme()
+        assert _contrast_ratio(dark.primary_fg, dark.primary_bg) >= 4.5
+
+    def test_light_primary_fg_meets_aa_and_does_not_regress(self) -> None:
+        """亮色 primary_fg 对应组合应 ≥ 4.5:1，且不差于原 primary（不回归）。"""
+        from gui.styling.themes import create_light_theme
+
+        light = create_light_theme()
+        assert _contrast_ratio(light.primary_fg, light.window_bg) >= 4.5
+        assert _contrast_ratio(light.primary_fg, light.card_bg) >= 4.5
+        assert _contrast_ratio(light.primary_fg, light.primary_bg) >= 4.5
+        # 不回归：替换原 primary 的场景下对比度只允许更严格
+        assert _contrast_ratio(light.primary_fg, light.window_bg) >= _contrast_ratio(
+            light.primary, light.window_bg
+        )
+        assert _contrast_ratio(light.primary_fg, light.card_bg) >= _contrast_ratio(
+            light.primary, light.card_bg
+        )
+
+
+class TestBuildQssFgAndFocus:
+    """primary_fg 消费与键盘焦点规则测试（UX-06 / UX-05）。"""
+
+    def test_outline_button_and_selected_tab_use_primary_fg(self) -> None:
+        """outline 按钮与 tab 选中态的文字/边框应使用 primary_fg（而非 primary）。"""
+        from gui.styling.qss import build_qss
+        from gui.styling.themes import create_dark_theme, create_light_theme
+
+        for theme in (create_light_theme(), create_dark_theme()):
+            qss = build_qss(theme)
+            outline_block = qss.split('QPushButton[btnType="outline"] {')[1].split("}")[0]
+            assert theme.primary_fg in outline_block, f"{theme.name}: outline 未用 primary_fg"
+            assert theme.primary not in outline_block, f"{theme.name}: outline 残留 primary"
+            tab_block = qss.split("QTabBar::tab:selected {")[1].split("}")[0]
+            assert theme.primary_fg in tab_block, f"{theme.name}: tab 选中态未用 primary_fg"
+            assert theme.primary not in tab_block, f"{theme.name}: tab 选中态残留 primary"
+
+    def test_qss_contains_keyboard_focus_rules_for_button_and_tab(self) -> None:
+        """两主题 QSS 均应包含 QPushButton:focus 与 QTabBar::tab:focus 规则。"""
+        from gui.styling.qss import build_qss
+        from gui.styling.themes import create_dark_theme, create_light_theme
+
+        for theme in (create_light_theme(), create_dark_theme()):
+            qss = build_qss(theme)
+            assert "QPushButton:focus" in qss, f"{theme.name}: 缺少 QPushButton:focus 规则"
+            assert "QTabBar::tab:focus" in qss, f"{theme.name}: 缺少 QTabBar::tab:focus 规则"

@@ -10,7 +10,7 @@ from typing import Any
 
 from lunar_python import Solar
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QColor, QPalette, QTextCharFormat
+from PySide6.QtGui import QColor, QFont, QPalette, QTextCharFormat
 from PySide6.QtWidgets import (
     QCalendarWidget,
     QFrame,
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.config import global_config
-from core.date_rules import rule_source, should_work_today
+from core.date_rules import SOURCE_TEXT, rule_source, should_work_today
 from gui.styling.theme_manager import ThemeManager
 from gui.styling.widgets import create_card_widget, create_label
 from infra import debug, error, info, warning
@@ -211,8 +211,20 @@ class CalendarView(QWidget):
         legend_layout.addWidget(self._create_legend_item("不执行任务"))
         legend_layout.addSpacing(16)
         legend_layout.addWidget(self._create_legend_item("调休上班"))
+        legend_layout.addSpacing(16)
+        legend_layout.addWidget(self._create_legend_bold_hint())
         legend_layout.addStretch()
         return legend_layout
+
+    @staticmethod
+    def _create_legend_bold_hint() -> QLabel:
+        """加粗提示（UX-11）：非颜色冗余编码，色觉障碍用户不依赖红绿底色也能区分。
+
+        文字本身加粗即编码示例；objectName=legendBoldHint 供测试定位。
+        """
+        hint = create_label("加粗日期 = 当天需要执行任务", font_size=9, bold=True)
+        hint.setObjectName("legendBoldHint")
+        return hint
 
     def _create_legend_item(self, text: str) -> QWidget:
         """创建单个图例项（色块颜色由 update_theme 统一填充）。"""
@@ -403,16 +415,9 @@ class CalendarView(QWidget):
                 "other_info": "",
             }
 
-    # 来源标识 → 状态文案前缀（与 core.date_rules.rule_source 的返回值对应；
-    # 法定假日/周末等无名称来源不加前缀，保持简洁）
-    _SOURCE_TEXT = {
-        "custom_workday": "自定义工作日",
-        "custom_holiday": "自定义假期",
-        "custom_weekly_work": "自定义每周执行日",
-        "custom_weekly_rest": "自定义每周休息日",
-        "compensatory": "调休上班日",
-        "builtin_holiday": "节假日",
-    }
+    # 来源标识 → 状态文案前缀：单一数据源 core.date_rules.SOURCE_TEXT，
+    # 此处仅保留类属性别名（既有 self._SOURCE_TEXT 引用与测试不动）
+    _SOURCE_TEXT = SOURCE_TEXT
 
     def should_work_on_date(self, date: datetime.date) -> tuple[bool, str]:
         """判断指定日期是否需要执行任务，并给出状态文案。
@@ -446,7 +451,7 @@ class CalendarView(QWidget):
             return (False, f"错误：{str(e)}")
 
     def mark_execution_dates(self) -> None:
-        """标记日历当前显示月份的执行日期（颜色取自当前主题）。
+        """标记日历当前显示月份的执行日期（颜色取自当前主题；执行日数字加粗）。
 
         以 yearShown()/monthShown() 为准：currentPageChanged 信号触发时
         selectedDate 仍停留在旧页（翻页不改变选中日期），用它定位会把
@@ -491,6 +496,10 @@ class CalendarView(QWidget):
                     fmt = QTextCharFormat()
                     fmt.setBackground(work_bg if should_work else rest_bg)
                     fmt.setForeground(fg)
+                    # 非颜色冗余编码（UX-11）：执行日加粗、休息日显式常规字重，
+                    # 红绿色觉障碍用户不依赖底色也能区分（setDateTextFormat
+                    # 只作用于日期 cell，加粗不影响表头与详情区）
+                    fmt.setFontWeight(QFont.Weight.Bold if should_work else QFont.Weight.Normal)
                     self.calendar.setDateTextFormat(qt_date, fmt)
                     day_count += 1
                 except Exception as e:

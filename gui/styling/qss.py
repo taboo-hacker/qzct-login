@@ -149,8 +149,8 @@ QPushButton[btnType="gray"] {{
 }}
 QPushButton[btnType="outline"] {{
     background: transparent;
-    color: {t.primary};
-    border: 1px solid {t.primary};
+    color: {t.primary_fg};
+    border: 1px solid {t.primary_fg};
 }}
 QPushButton[btnType="outline"]:hover {{
     background: {t.primary_bg};
@@ -171,6 +171,12 @@ QPushButton[btnType="text"] {{
 QPushButton[btnType="text"]:hover {{
     background: {t.hover_bg};
     color: {t.text_primary};
+}}
+/* 键盘焦点：全局 QSS 会抑制 Fusion 原生焦点矩形，需显式绘制焦点边框。
+   规则置于全部按钮变体之后（同特异性时后序生效），使 border: none 的
+   实色按钮聚焦时也能显示焦点框；primary_fg 与各按钮底色均不同色。 */
+QPushButton:focus {{
+    border: 2px solid {t.primary_fg};
 }}
 
 /* ---- 输入控件 ---- */
@@ -225,12 +231,17 @@ QTabBar::tab {{
     border: none;
 }}
 QTabBar::tab:selected {{
-    color: {t.primary};
-    border-bottom: 2px solid {t.primary};
+    color: {t.primary_fg};
+    border-bottom: 2px solid {t.primary_fg};
     font-weight: 600;
 }}
 QTabBar::tab:hover {{
     color: {t.text_primary};
+}}
+/* 键盘焦点：聚焦的 tab 用 primary_fg 下划线标出位置（选中+聚焦时
+   后序规则生效，与选中态同色，视觉统一）。 */
+QTabBar::tab:focus {{
+    border-bottom: 2px solid {t.primary_fg};
 }}
 
 /* ---- 菜单 ---- */

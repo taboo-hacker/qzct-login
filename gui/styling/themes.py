@@ -49,6 +49,12 @@ class ThemeColors:
     primary_hover: str = "#2357C4"
     primary_pressed: str = "#1C47A3"
     primary_disabled: str = "#A8C1F2"
+    # 前景专用主色：供"彩色文字画在浅/深背景上"的场景（tab 选中文字、outline
+    # 按钮文字与边框、键盘焦点边框）。取 primary 的深变体（= primary_dark），
+    # 保证对实际背景 ≥ WCAG AA（4.5:1）：对 #FFFFFF 5.82:1、#F5F6F8（窗口/tab 底）
+    # 5.38:1、#E3F2FD（outline hover 底）5.10:1（原 primary #0078D4 对 #F5F6F8 仅
+    # 4.19:1，不达标）。
+    primary_fg: str = "#0067B5"
     success_hover: str = "#0E6A0E"
     danger_hover: str = "#A10F1C"
     warning_hover: str = "#A8430D"
@@ -94,6 +100,11 @@ def create_dark_theme() -> ThemeColors:
         primary_hover="#3395DD",
         primary_pressed="#2A7DC2",
         primary_disabled="#3E5F7E",
+        # 前景专用主色（亮蓝调，与 primary 同色系）：对暗色实际背景均 ≥ WCAG AA
+        # （4.5:1）——对 #1F1F1F（窗口/tab 底）7.47:1、#2A2A2A（卡片底）6.50:1、
+        # #1A3A52（outline hover 底）5.37:1（原 primary #1565C0 分别仅
+        # 2.87:1 / 2.50:1 / 2.06:1，不达标）。
+        primary_fg="#7CB3EC",
         success_hover="#4FB14F",
         danger_hover="#D05050",
         warning_hover="#D08030",

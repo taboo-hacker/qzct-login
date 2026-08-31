@@ -6,7 +6,9 @@ CalendarView 万年历视图测试
   必须以 yearShown/monthShown 定位——回归：翻页后新月份无标记），
   且重标前清空历史标记（无跨月残留）；
 - LUNAR_DISPLAY_FORMAT 设置项消费：简化/完整两种农历显示格式切换生效；
-- should_work_on_date：状态文案与判定核心（core.date_rules）的优先级一致。
+- should_work_on_date：状态文案与判定核心（core.date_rules）的优先级一致；
+- 非颜色冗余编码（UX-11）：执行日数字加粗、休息日常规字重，图例含
+  “加粗”文字提示——红绿色觉障碍用户不依赖底色也能区分执行/不执行。
 
 各用例先替换 global_config 为受控数据（conftest autouse fixture 负责还原），
 判定函数按需 patch 为确定值，避免依赖真实节假日库数据。
@@ -16,7 +18,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QCalendarWidget
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QCalendarWidget, QLabel
 from pytestqt.qtbot import QtBot
 
 from core.config import global_config
@@ -119,6 +122,45 @@ class TestMarkExecutionDates:
         work_fmt = view.calendar.dateTextFormat(QDate(year, month, 2))
         rest_fmt = view.calendar.dateTextFormat(QDate(year, month, 1))
         assert work_fmt.background().color() != rest_fmt.background().color()
+
+    def test_workday_bold_restday_normal_font_weight(
+        self, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """UX-11：执行日数字加粗（Bold）、休息日显式常规字重（Normal）。"""
+        _ensure_qapp()
+        view = _make_view(qtbot)
+        assert view.calendar is not None
+
+        import gui.widgets.calendar_view as cv
+
+        monkeypatch.setattr(cv, "should_work_today", lambda d: d.day % 2 == 0)
+
+        year, month = view.calendar.yearShown(), view.calendar.monthShown()
+        view.mark_execution_dates()
+
+        work_fmt = view.calendar.dateTextFormat(QDate(year, month, 2))
+        rest_fmt = view.calendar.dateTextFormat(QDate(year, month, 1))
+        assert work_fmt.fontWeight() == int(QFont.Weight.Bold)
+        assert rest_fmt.fontWeight() == int(QFont.Weight.Normal)
+
+        # update_theme 刷新路径内部重跑 mark_execution_dates，加粗编码应保持
+        view.update_theme()
+        refreshed = view.calendar.dateTextFormat(QDate(year, month, 2))
+        assert refreshed.fontWeight() == int(QFont.Weight.Bold)
+
+
+class TestLegendAccessibility:
+    """图例可访问性测试：非颜色冗余编码（UX-11 色觉障碍友好）。"""
+
+    def test_legend_contains_bold_hint(self, qtbot: QtBot) -> None:
+        """图例应包含“加粗日期 = 需要执行任务”文字提示。"""
+        _ensure_qapp()
+        view = _make_view(qtbot)
+
+        hint = view.findChild(QLabel, "legendBoldHint")
+        assert hint is not None, "图例缺少加粗提示标签"
+        assert "加粗" in hint.text()
+        assert "需要执行任务" in hint.text()
 
 
 class TestLunarDisplayFormat:
@@ -225,3 +267,14 @@ class TestShouldWorkOnDateStatus:
 
         _, status2 = view.should_work_on_date(datetime.date(2026, 1, 4))
         assert "调休上班日" in status2
+
+
+class TestSourceTextSingleSource:
+    """来源文案单一数据源测试：_SOURCE_TEXT 是 core.date_rules.SOURCE_TEXT 的别名。"""
+
+    def test_source_text_is_alias_of_core_constant(self) -> None:
+        """类属性 _SOURCE_TEXT 应直接引用 core 的 SOURCE_TEXT（不再第三份私有实现）。"""
+        from core.date_rules import SOURCE_TEXT
+        from gui.widgets.calendar_view import CalendarView
+
+        assert CalendarView._SOURCE_TEXT is SOURCE_TEXT
