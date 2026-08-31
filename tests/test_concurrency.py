@@ -24,12 +24,7 @@ from infra.concurrency import (
     TaskExecutor,
     task,
 )
-
-
-def _ensure_qapp() -> QApplication:
-    """模块级辅助函数：确保存在 QApplication 实例（Qt 信号机制所必需）。"""
-    app = QApplication.instance()
-    return app if isinstance(app, QApplication) else QApplication([])
+from tests.conftest import ensure_qapp as _ensure_qapp
 
 
 class TestTaskContext:

@@ -53,7 +53,7 @@
 | GUI 层 | 界面、交互、主题 | `gui/` |
 | 业务服务层 | WiFi / 登录 / 关机 | `services/` |
 | 并发调度层 | 任务链、线程池、取消 | `infra/concurrency.py` |
-| 核心逻辑层 | 配置、日期规则、农历 | `core/` |
+| 核心逻辑层 | 配置、日期规则、节假日 | `core/` |
 | 基础设施层 | 日志、日期工具 | `infra/`、`utils/` |
 
 ### 一次任务执行的流程
@@ -63,7 +63,7 @@
   → load_config()（读取 ~/.qzct/config.json，旧数据迁移）
   → 应用保存的主题（全局 QSS）
   → 构建界面（左卡片 + 右三标签页）
-  → 1 秒后自动启动任务链
+  → 1 秒后自动启动任务链（首次使用未配置账号/WiFi 时跳过并引导设置）
 任务链（TaskChain，顺序执行）：
   1. 检查执行条件 → 今天无需执行时返回 chain_break，链提前成功结束
   2. 连接 WiFi（重试+退避，可协作取消）
@@ -86,14 +86,15 @@
 
 - **`ConfigManager(dict)`**：线程安全配置字典（RLock）；`get`/取值对 list/dict 浅拷贝；`snapshot()` 深拷贝
 - **`global_config`**：全局配置实例；**`get_config_snapshot()`** 供工作线程批量读取
-- **`load_config()`**：读 JSON → 旧数据迁移（ENC: 加密字段清空、ISP_SUFFIX→ISP_TYPE、DATE_RULES 旧字段）→ schema 校验 → 假期新鲜度检查 → 原子替换
-- **`save_config()`**：临时文件 + fsync + os.replace 原子写入
-- **明文存储**：WiFi/登录密码明文保存于 `~/.qzct/config.json`（v1.4.1 起移除主密码加密体系）
+- **`load_config()`**：读 JSON → 旧数据迁移（ENC: 加密字段清空、ISP_SUFFIX→ISP_TYPE、DATE_RULES 旧字段）→ schema 校验 → 假期新鲜度检查 → 原子替换；失败返回错误信息（弹窗由 GUI 层展示）
+- **`save_config()`**：临时文件 + fsync + os.replace 原子写入，落盘后收紧文件权限至当前用户
+- **明文存储**：WiFi/登录密码明文保存于 `~/.qzct/config.json`（v1.4.1 起移除主密码加密体系），保存后经 icacls/chmod 600 收权
 - 旧版密钥遗留文件在启动时自动清理
 
 ### 3. core/date_rules.py - 日期判断
 
-`should_work_today(date)` 优先级：
+`rule_source(date)` 是唯一的优先级阶梯实现，返回 (来源标识, 命中区间)；
+`should_work_today(date)`（是否执行）与日历状态文案均由它派生。优先级：
 
 1. **自定义规则**（`ENABLE_CUSTOM_RULE=True`）：自定义工作日区间 → 自定义假期区间 → 每周执行日。完全遵守用户配置，硬编码数据与 chinesecalendar 不覆盖
 2. **硬编码调休上班日**（COMPENSATORY_WORKDAYS）
@@ -114,8 +115,8 @@
 
 ### 5. infra/logging.py + gui/log_sink.py - 日志系统
 
-- Loguru 后端；`init_logger(gui_widget, log_file, level)` 初始化
-- 文件日志 `~/.qzct/qzct.log`（5MB 轮转×5），权限收紧至当前用户
+- Loguru 后端；`init_logger(gui_sink, log_file, level)` 初始化（GUI sink 由 gui 层绑定 QtLogSink 后以回调注入，utils 层不依赖 PySide6）
+- 文件日志 `~/.qzct/qzct.log`（10MB 轮转、保留 35 天），权限收紧至当前用户
 - **`QtLogSink`**：跨线程日志投递用 **Signal**（emit 可发生在工作线程，槽在主线程执行，Qt 自动 QueuedConnection）。早期 `QTimer.singleShot` 实现曾在工作线程丢失日志
 - `StreamRedirector`：stdout/stderr 转发到日志
 - 登录模块对日志做密码脱敏（`_sanitize`）

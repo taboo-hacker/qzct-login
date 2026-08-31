@@ -6,7 +6,6 @@ create_card_widget/create_tip_label）、LogTextEdit 彩色日志控件、
 ThemeManager 主题切换/注册，以及 build_qss 全局样式表的生成。
 """
 
-from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from gui.styling.theme_manager import ThemeManager
@@ -19,12 +18,7 @@ from gui.styling.widgets import (
     create_section_title,
     create_tip_label,
 )
-
-
-def _ensure_qapp() -> QApplication:
-    """模块级辅助函数：确保 QApplication 实例存在（控件创建依赖）。"""
-    app = QApplication.instance()
-    return app if isinstance(app, QApplication) else QApplication([])
+from tests.conftest import ensure_qapp as _ensure_qapp
 
 
 class TestCreateButton:

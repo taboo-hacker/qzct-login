@@ -9,16 +9,10 @@ GUI 模块测试
 from typing import Any
 
 import pytest
-from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from gui.styling.themes import BUILTIN_THEMES, ThemeColors, create_dark_theme, create_light_theme
-
-
-def _ensure_qapp() -> QApplication:
-    """模块级辅助函数：确保存在 QApplication 实例（Qt 信号机制所必需）。"""
-    app = QApplication.instance()
-    return app if isinstance(app, QApplication) else QApplication([])
+from tests.conftest import ensure_qapp as _ensure_qapp
 
 
 class TestThemeColors:

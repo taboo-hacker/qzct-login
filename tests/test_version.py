@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 class TestGetProjectVersion:
     """get_project_version 测试：按版本来源（文件/缓存/frozen/异常）分组。"""
@@ -116,3 +118,34 @@ class TestGetProjectVersion:
         with patch.object(version_mod.os.path, "dirname", side_effect=RuntimeError("boom")):
             result = version_mod.get_project_version()
             assert result == "1.0.0"
+
+    def test_falls_back_to_tomli_when_tomllib_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """tomllib 不可用时（Python 3.10）应回退到 tomli 解析。"""
+        import sys
+
+        import utils.version as version_mod
+
+        version_mod._cached_project_version = None
+        # sys.modules 条目置 None 可令 import 抛 ImportError
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+        version = version_mod.get_project_version()
+        assert isinstance(version, str)
+        assert version != "1.0.0"  # 经 tomli 仍应解析到真实版本
+
+    def test_falls_back_to_plain_text_when_both_toml_libs_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """tomllib 与 tomli 均不可用时应回退到纯文本解析 version 行。"""
+        import sys
+
+        import utils.version as version_mod
+
+        version_mod._cached_project_version = None
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+        monkeypatch.setitem(sys.modules, "tomli", None)
+        version = version_mod.get_project_version()
+        # 纯文本解析同样应读到 pyproject 中的真实版本号
+        assert isinstance(version, str)
+        assert version != "1.0.0"

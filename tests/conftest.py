@@ -15,9 +15,20 @@ from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
 # 将项目根目录加入 sys.path，使测试可直接以顶层包名导入 core/infra/gui 等模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def ensure_qapp() -> QApplication:
+    """共享辅助函数：确保 QApplication 实例存在（qtbot 之外的兜底初始化）。
+
+    原先在 9 个 GUI 测试文件中逐字复制，收敛到 conftest 单一实现；
+    各文件以 ``from tests.conftest import ensure_qapp as _ensure_qapp`` 引用。
+    """
+    app = QApplication.instance()
+    return app if isinstance(app, QApplication) else QApplication([])
 
 
 @pytest.fixture

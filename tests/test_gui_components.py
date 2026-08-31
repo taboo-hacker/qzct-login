@@ -11,13 +11,7 @@ from PySide6.QtWidgets import QApplication, QTextEdit, QWidget
 from pytestqt.qtbot import QtBot
 
 from gui.log_sink import QtLogSink
-
-
-def _ensure_qapp() -> QApplication:
-    """模块级辅助函数：确保 QApplication 实例存在（托盘/信号机制依赖）。"""
-    app = QApplication.instance()
-    return app if isinstance(app, QApplication) else QApplication([])
-
+from tests.conftest import ensure_qapp as _ensure_qapp
 
 # =====================================================================
 # TrayManager

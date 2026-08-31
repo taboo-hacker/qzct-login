@@ -13,7 +13,7 @@ gui/widgets/* 补充测试
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from PySide6.QtWidgets import QApplication, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import QTableWidgetItem, QWidget
 from pytestqt.qtbot import QtBot
 
 from core.config import global_config
@@ -22,10 +22,7 @@ if TYPE_CHECKING:
     from gui.widgets.base_list_editor import BaseListEditorWidget
 
 
-def _ensure_qapp() -> QApplication:
-    """模块级辅助函数：确保 QApplication 实例存在（控件渲染依赖）。"""
-    app = QApplication.instance()
-    return app if isinstance(app, QApplication) else QApplication([])
+from tests.conftest import ensure_qapp as _ensure_qapp
 
 
 class TestBaseListEditorWidget:

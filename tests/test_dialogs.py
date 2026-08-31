@@ -11,16 +11,10 @@ gui/dialogs/* 补充测试
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from core.config import global_config
-
-
-def _ensure_qapp() -> QApplication:
-    """模块级辅助函数：确保 QApplication 实例存在（对话框渲染依赖）。"""
-    app = QApplication.instance()
-    return app if isinstance(app, QApplication) else QApplication([])
+from tests.conftest import ensure_qapp as _ensure_qapp
 
 
 class TestPeriodEditDialog:

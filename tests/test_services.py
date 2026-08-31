@@ -279,3 +279,99 @@ class TestParseJsonpParametrized:
 
         with pytest.raises(JSONPParseError):
             parse_jsonp(jsonp_text, "dr1004")
+
+
+class TestCampusLoginFailures:
+    """校园网登录失败分支测试：各类失败均应捕获并返回 False（不抛异常）。"""
+
+    def test_auth_failure_returns_false(
+        self, sample_config: dict[str, Any], mock_requests: MagicMock
+    ) -> None:
+        """服务器返回 ret_code=1（认证失败）时应返回 False。"""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = 'dr1004({"ret_code": 1, "msg": "账号或密码错误"})'
+        mock_requests.post.return_value = mock_response
+
+        result = campus_login(sample_config)
+        assert result is False
+
+    def test_network_error_returns_false(self, sample_config: dict[str, Any]) -> None:
+        """请求抛 RequestException（网络不可达）时应返回 False。"""
+        from requests.exceptions import RequestException
+
+        with patch("services.campus_login.requests.Session") as mock_session:
+            mock_session.return_value.__enter__.side_effect = RequestException("unreachable")
+            result = campus_login(sample_config)
+        assert result is False
+
+    def test_invalid_jsonp_returns_false(
+        self, sample_config: dict[str, Any], mock_requests: MagicMock
+    ) -> None:
+        """响应非 JSONP 格式（解析失败）时应返回 False。"""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "<html>gateway error page</html>"
+        mock_requests.post.return_value = mock_response
+
+        result = campus_login(sample_config)
+        assert result is False
+
+    def test_credentials_never_logged_in_plaintext(
+        self, sample_config: dict[str, Any], mock_requests: MagicMock
+    ) -> None:
+        """_sanitize 应把日志中的密码字段脱敏为 ***（安全回归）。"""
+        from services.campus_login import _sanitize
+
+        raw = "post failed: user_account=secret_user&user_password=secret_pass&x=1"
+        cleaned = _sanitize(raw)
+        assert "secret_pass" not in cleaned
+        assert "user_password=***" in cleaned
+
+
+class TestTaskFailureBranches:
+    """任务函数失败分支测试：失败不抛异常，以结果字典如实回报。"""
+
+    def test_task_connect_wifi_failure(self, sample_config: dict[str, Any]) -> None:
+        """auto_connect_wifi 返回 False 时结果应为 wifi_connected=False。"""
+        global_config.clear()
+        global_config.update(sample_config)
+        ctx = TaskContext("test")
+
+        with patch("services.tasks.auto_connect_wifi", return_value=False):
+            result = task_connect_wifi(ctx)
+        assert result["wifi_connected"] is False
+        assert "error" in result
+
+    def test_task_connect_wifi_not_configured(self) -> None:
+        """未配置 WiFi 名称时应跳过并返回 wifi_connected=None（区别于失败）。"""
+        global_config.clear()
+        global_config.update({"WIFI_NAME": "", "WIFI_PASSWORD": ""})
+        ctx = TaskContext("test")
+
+        result = task_connect_wifi(ctx)
+        assert result["wifi_connected"] is None
+        assert result["reason"] == "not_configured"
+
+    def test_task_campus_login_failure(self, sample_config: dict[str, Any]) -> None:
+        """campus_login 返回 False 时结果应为 login_successful=False。"""
+        global_config.clear()
+        global_config.update(sample_config)
+        ctx = TaskContext("test")
+
+        with patch("services.tasks.campus_login", return_value=False):
+            result = task_campus_login(ctx)
+        assert result["login_successful"] is False
+
+    def test_task_set_shutdown_command_failed(self, sample_config: dict[str, Any]) -> None:
+        """shutdown 命令执行失败时结果应为 shutdown_set=False + command_failed。"""
+        global_config.clear()
+        global_config.update({**sample_config, "SHUTDOWN_HOUR": 23, "SHUTDOWN_MIN": 59})
+        ctx = TaskContext("test")
+
+        # 注入远期未来日期无意义：set_shutdown_timer 由真实 now 计算，
+        # 用 23:59 保证 now < shutdown_time（除非测试恰在 23:59 运行，可接受）
+        with patch("services.tasks.set_shutdown_timer", return_value=False):
+            result = task_set_shutdown(ctx)
+        assert result["shutdown_set"] is False
+        assert result["reason"] == "command_failed"

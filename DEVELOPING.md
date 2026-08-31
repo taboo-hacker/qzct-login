@@ -88,15 +88,15 @@ qzct-login/
 ├── build.py                    # 本地构建脚本（PyInstaller + 校验和）
 ├── qzct-login.spec             # PyInstaller 打包配置（含 pyproject.toml 数据）
 ├── core/                       # 核心领域层（无 GUI 依赖）
-│   ├── config.py               # 配置管理（ConfigManager / load / save，明文存储）
+│   ├── config.py               # 配置管理（ConfigManager / load / save，明文存储 + 落盘后收权）
 │   ├── config_validator.py     # 配置 schema 校验
-│   ├── constants.py            # 常量（校园网协议 / 路径）
+│   ├── constants.py            # 常量（校园网协议 / ISP 映射 / 路径 / 子进程超时）
 │   ├── exceptions.py           # 自定义异常（WiFi / 校园网登录两类）
-│   ├── date_rules.py           # 日期判断（自定义规则优先级最高）
-│   ├── holidays.py             # 2025/2026 假期与调休数据
-│   └── lunar.py                # 农历工具（lunar-python 封装）
-├── infra/                      # 基础设施层
-│   ├── concurrency.py          # 并发框架（TaskContext / TaskExecutor / TaskChain）
+│   ├── date_rules.py           # 日期判断（rule_source 唯一优先级阶梯）
+│   └── holidays.py             # 2025/2026 假期与调休数据
+├── infra/                      # 基础设施层（共享内核：可被 core/services/gui 各层使用）
+│   ├── concurrency.py          # 并发框架（TaskContext / TaskExecutor / TaskChain，Qt Signal 回报）
+│   ├── file_permissions.py     # 敏感文件权限收紧（icacls / chmod 600）
 │   ├── logging.py              # 日志系统（Logger / StreamRedirector / init_logger）
 │   └── date_utils.py           # 日期工具（区间判断 / 解析）
 ├── services/                   # 业务服务层
@@ -113,9 +113,9 @@ qzct-login/
 │   └── widgets/                # 组件（calendar_view / 列表编辑器 / 规则组件）
 ├── utils/                      # 工具模块
 │   ├── version.py              # 版本读取（frozen 模式从 _MEIPASS）
-│   ├── logger.py               # Loguru 封装
+│   ├── logger.py               # Loguru 封装（gui_sink 回调注入，不依赖 gui）
 │   └── single_instance.py      # 单实例控制（QLocalServer 命名管道）
-└── tests/                      # 测试（295+ 用例，pytest + pytest-qt）
+└── tests/                      # 测试（325+ 用例，pytest + pytest-qt）
 ```
 
 ## 提交代码

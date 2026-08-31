@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtWidgets import QApplication, QCalendarWidget
+from PySide6.QtWidgets import QCalendarWidget
 from pytestqt.qtbot import QtBot
 
 from core.config import global_config
@@ -25,10 +25,7 @@ if TYPE_CHECKING:
     from gui.widgets.calendar_view import CalendarView
 
 
-def _ensure_qapp() -> QApplication:
-    """模块级辅助函数：确保 QApplication 实例存在（控件渲染依赖）。"""
-    app = QApplication.instance()
-    return app if isinstance(app, QApplication) else QApplication([])
+from tests.conftest import ensure_qapp as _ensure_qapp
 
 
 def _make_view(qtbot: QtBot) -> "CalendarView":
