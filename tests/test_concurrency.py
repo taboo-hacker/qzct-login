@@ -129,7 +129,14 @@ class TestTaskExecutor:
 
         @task("取消测试")
         def long_task(ctx: TaskContext) -> dict:
-            time.sleep(10)
+            # 协作式取消：线程池无法强杀线程，任务须自查取消标志尽快退出。
+            # 若直接 sleep(10)，测试结束后线程仍在运行，醒来会在已被回收的
+            # TaskExecutor 上 emit 信号，导致整个测试进程段错误
+            # （Linux CI 上必现：退出码 139）
+            for _ in range(100):
+                if ctx.is_cancelled():
+                    return {}
+                time.sleep(0.1)
             return {}
 
         executor.submit(long_task, "取消测试")
@@ -140,7 +147,8 @@ class TestTaskExecutor:
         with executor._lock:
             for ctx in executor._contexts.values():
                 assert ctx.is_cancelled()
-        executor.shutdown(wait=False)
+        # wait=True：等协作式取消生效（≤0.1s），确保线程退出后再释放 executor
+        executor.shutdown(wait=True)
 
 
 class TestTaskChain:

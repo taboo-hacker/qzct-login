@@ -167,7 +167,7 @@ class TestTaskExecutorActiveCount:
             executor.shutdown(wait=False)
 
     def test_active_count_after_submit(self, qtbot: QtBot) -> None:
-        """提交长任务（sleep 10s）后 active_count 应至少为 1。"""
+        """提交长任务后 active_count 应至少为 1。"""
         import time
 
         from infra.concurrency import TaskContext, TaskExecutor, task
@@ -177,7 +177,14 @@ class TestTaskExecutorActiveCount:
 
         @task("长任务")
         def long_task(ctx: TaskContext) -> dict[str, Any]:
-            time.sleep(10)
+            # 协作式取消：线程池无法强杀线程，任务须自查取消标志尽快退出。
+            # 若像原先那样直接 sleep(10)，测试结束后线程仍在运行，醒来会在
+            # 已被回收的 TaskExecutor 上 emit 信号，导致整个测试进程段错误
+            # （Linux CI 上必现：退出码 139）
+            for _ in range(100):
+                if ctx.is_cancelled():
+                    return {}
+                time.sleep(0.1)
             return {}
 
         try:
@@ -187,7 +194,8 @@ class TestTaskExecutorActiveCount:
             assert executor.active_count >= 1
         finally:
             executor.cancel_all()
-            executor.shutdown(wait=False)
+            # wait=True：等协作式取消生效（≤0.1s），确保线程退出后再释放 executor
+            executor.shutdown(wait=True)
 
     def test_max_workers_reasonable(self, qtbot: QtBot) -> None:
         """max_workers 应落在 [1, min(cpu_count*4, 16)] 的合理范围内。"""
