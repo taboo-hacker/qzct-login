@@ -7,6 +7,7 @@
 import contextlib
 import datetime
 import sys
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -58,6 +59,14 @@ from services.wifi import (
 )
 from utils.version import get_project_version
 
+# 任务链失败项 → 可执行的下一步建议（键与 _on_chain_success 里的 failed 文案一致）。
+# 单一数据源：底部状态栏与托盘气泡共用，避免两处文案各写一份而漂移。
+_FAILURE_HINTS: dict[str, str] = {
+    "WiFi 连接": "请到「设置」核对 WiFi 名称与密码",
+    "校园网登录": "请到「设置」核对账号、密码与运营商类型",
+    "定时关机": "请检查系统是否允许 shutdown 命令",
+}
+
 
 class MainWindow(QMainWindow):
     """主窗口
@@ -101,6 +110,10 @@ class MainWindow(QMainWindow):
         # 界面当前展示的日期：跨零点后由时钟回调对比触发"今日状态"刷新
         # （须在 _init_ui 之前初始化，_update_status_display 换天时依赖它）
         self._shown_date: datetime.date = datetime.date.today()
+        # 当前任务链的步骤名顺序与各步起始时刻（单调时钟），
+        # 供底部状态栏显示"第 N/M 步"与单步耗时
+        self._chain_step_names: list[str] = []
+        self._step_started_at: dict[str, float] = {}
 
         # 日志组件先创建，供日志系统使用
         self.log_text = LogTextEdit()
@@ -541,23 +554,52 @@ class MainWindow(QMainWindow):
         chain.add(task_set_shutdown)
         chain.on_success(self._on_chain_success)
         chain.on_error(self._on_chain_error)
+        # 记录步骤顺序与各步起始时刻，供 started/finished 信号换算"第 N/M 步"与耗时
+        self._chain_step_names = chain.step_names
+        self._step_started_at.clear()
         chain.execute(self.task_executor)
 
     def _on_task_started(self, task_name: str) -> None:
-        """单个任务开始（TaskExecutor.started 信号，主线程执行）。"""
+        """单个任务开始（TaskExecutor.started 信号，主线程执行）。
+
+        同步刷新底部状态：任务执行期间（WiFi 重试最长可达数分钟）若只写日志，
+        状态栏会一直停在上一步的"完成"文案，用户看不出程序仍在工作。
+        """
         info("main", f"任务开始: {task_name}")
+        self._step_started_at[task_name] = time.monotonic()
+        if not hasattr(self, "footer_status"):
+            return
+        total = len(self._chain_step_names)
+        if task_name in self._chain_step_names:
+            index = self._chain_step_names.index(task_name) + 1
+            self._set_footer(f"正在执行：{task_name}（第 {index}/{total} 步）")
+        else:
+            self._set_footer(f"正在执行：{task_name}")
 
     def _on_task_finished(self, task_name: str, result: dict[str, Any]) -> None:
         """单个任务成功（TaskExecutor.finished 信号，主线程执行）。"""
         info("main", f"任务完成: {task_name}")
         if hasattr(self, "footer_status"):
-            self._set_footer(f"{task_name} 完成")
+            elapsed = self._pop_step_elapsed(task_name)
+            self._set_footer(f"{task_name} 完成{elapsed}")
 
     def _on_task_error(self, task_name: str, error_msg: str) -> None:
         """单个任务抛异常（TaskExecutor.error 信号，主线程执行）。"""
         error("main", f"任务出错: {task_name} - {error_msg}")
         if hasattr(self, "footer_status"):
-            self._set_footer(f"{task_name} 出错")
+            elapsed = self._pop_step_elapsed(task_name)
+            self._set_footer(f"{task_name} 出错{elapsed}")
+
+    def _pop_step_elapsed(self, task_name: str) -> str:
+        """取出并清除某步骤的起始时刻，返回可拼接的耗时后缀（无记录则空串）。
+
+        用单调时钟（time.monotonic）而非墙钟：系统对时/夏令时调整不会让
+        耗时出现负数或跳变。
+        """
+        started = self._step_started_at.pop(task_name, None)
+        if started is None:
+            return ""
+        return f"（耗时 {time.monotonic() - started:.1f}s）"
 
     def _on_chain_success(self, success: bool, results: dict[str, Any]) -> None:
         """任务链整体完成回调：如实报告每一步的成败与关机设置状态。
@@ -618,11 +660,14 @@ class MainWindow(QMainWindow):
                 if shutdown_set
                 else f"{fail_text}失败"
             )
-            self._set_footer(summary)
+            # 失败项对应可执行的下一步建议：只报"失败"用户仍需自行翻日志找原因，
+            # 给出排查入口后多数情况可直接自助修复（footer 有 tooltip 可看全文）
+            hint = next((_FAILURE_HINTS[item] for item in failed if item in _FAILURE_HINTS), "")
+            self._set_footer(f"{summary}；{hint}" if hint else summary)
             error("main", f"任务链执行完成，存在失败步骤：{fail_text}", exc_info=False)
             self._tray.notify(
                 "校园网自动登录",
-                f"{summary}，详情见运行日志",
+                f"{summary}\n{hint}" if hint else f"{summary}，详情见运行日志",
                 icon=QSystemTrayIcon.MessageIcon.Warning,
             )
         elif shutdown_set:

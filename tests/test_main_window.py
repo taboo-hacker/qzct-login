@@ -744,7 +744,7 @@ class TestTrayNotifyLevels:
         )
 
     def test_failure_summary_notifies_warning(self, main_window: "MainWindow") -> None:
-        """存在失败步骤的摘要通知应以 Warning 图标发出。"""
+        """存在失败步骤的摘要通知应以 Warning 图标发出，并附带可执行的排查建议。"""
         from PySide6.QtWidgets import QSystemTrayIcon
 
         tray = _tray_mock(main_window)
@@ -757,7 +757,7 @@ class TestTrayNotifyLevels:
         main_window._on_chain_success(True, results)
         tray.notify.assert_called_once_with(
             "校园网自动登录",
-            "WiFi 连接失败；已设置 23:00 定时关机，详情见运行日志",
+            "WiFi 连接失败；已设置 23:00 定时关机\n请到「设置」核对 WiFi 名称与密码",
             icon=QSystemTrayIcon.MessageIcon.Warning,
         )
 
@@ -851,3 +851,87 @@ class TestWindowStatePersistence:
 
         monkeypatch.setattr(mw_module, "save_config", _boom)
         main_window._save_window_state()  # 不应抛异常
+
+
+class TestTaskChainProgressFeedback:
+    """任务链进度反馈：状态栏显示"第 N/M 步"与单步耗时。
+
+    回归：此前 started 信号只写日志，任务执行期间（WiFi 重试可达数分钟）
+    状态栏一直停在上一步的"完成"文案，用户看不出程序仍在工作。
+    """
+
+    _STEPS = ["检查执行条件", "连接WiFi", "登录校园网", "设置定时关机"]
+
+    def test_started_shows_step_position(self, main_window: "MainWindow") -> None:
+        """步骤开始时状态栏应显示当前序号与总步数。"""
+        main_window._chain_step_names = list(self._STEPS)
+        main_window._on_task_started("连接WiFi")
+
+        assert main_window.footer_status.text() == "正在执行：连接WiFi（第 2/4 步）"
+
+    def test_started_without_chain_shows_name_only(self, main_window: "MainWindow") -> None:
+        """步骤名不在链内时只显示任务名，不显示错误的序号。"""
+        main_window._chain_step_names = []
+        main_window._on_task_started("孤立任务")
+
+        assert "孤立任务" in main_window.footer_status.text()
+        assert "第" not in main_window.footer_status.text()
+
+    def test_finished_appends_elapsed(self, main_window: "MainWindow") -> None:
+        """步骤完成后状态栏应带上耗时。"""
+        main_window._chain_step_names = list(self._STEPS)
+        main_window._on_task_started("连接WiFi")
+        main_window._on_task_finished("连接WiFi", {})
+
+        text = main_window.footer_status.text()
+        assert text.startswith("连接WiFi 完成")
+        assert "耗时" in text
+
+    def test_error_appends_elapsed_and_clears_record(self, main_window: "MainWindow") -> None:
+        """步骤出错同样显示耗时，且起始时刻记录被清除（不跨链残留）。"""
+        main_window._chain_step_names = list(self._STEPS)
+        main_window._on_task_started("登录校园网")
+        main_window._on_task_error("登录校园网", "boom")
+
+        assert "耗时" in main_window.footer_status.text()
+        assert main_window._step_started_at == {}
+
+
+class TestFailureHints:
+    """失败摘要可操作化：footer 附带排查入口，用户无需翻日志找原因。"""
+
+    def test_wifi_failure_hint_points_to_settings(self, main_window: "MainWindow") -> None:
+        """WiFi 失败应提示到设置页核对 WiFi 名称与密码。"""
+        results = {
+            "检查执行条件": {"need_work": True},
+            "连接WiFi": {"wifi_connected": False},
+            "登录校园网": {"login_successful": True},
+            "设置定时关机": {"shutdown_set": True, "seconds": 3600},
+        }
+        main_window._on_chain_success(True, results)
+
+        assert "请到「设置」核对 WiFi 名称与密码" in main_window.footer_status.text()
+
+    def test_login_failure_hint_mentions_isp(self, main_window: "MainWindow") -> None:
+        """登录失败应提示核对账号密码与运营商类型。"""
+        results = {
+            "检查执行条件": {"need_work": True},
+            "连接WiFi": {"wifi_connected": True},
+            "登录校园网": {"login_successful": False},
+            "设置定时关机": {"shutdown_set": True, "seconds": 3600},
+        }
+        main_window._on_chain_success(True, results)
+
+        assert "运营商类型" in main_window.footer_status.text()
+
+    def test_all_success_has_no_hint(self, main_window: "MainWindow") -> None:
+        """全部成功时不应出现排查建议。"""
+        results = {
+            "检查执行条件": {"need_work": True},
+            "连接WiFi": {"wifi_connected": True},
+            "登录校园网": {"login_successful": True},
+            "设置定时关机": {"shutdown_set": True, "seconds": 3600},
+        }
+        main_window._on_chain_success(True, results)
+
+        assert "请到「设置」" not in main_window.footer_status.text()

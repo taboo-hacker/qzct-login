@@ -422,6 +422,15 @@ class TaskChain:
         self._parent = parent
         self._executor: TaskExecutor | None = None
 
+    @property
+    def step_names(self) -> list[str]:
+        """按添加顺序返回各步骤显示名（供调用方展示"第 N/M 步"进度）。
+
+        名称与 TaskExecutor.started/finished/error 信号携带的 task_name 一致，
+        调用方据此把信号里的任务名映射回链内序号。
+        """
+        return [str(step["name"]) for step in self._steps]
+
     def add(
         self,
         func: Callable[..., Any],

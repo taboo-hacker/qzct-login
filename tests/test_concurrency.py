@@ -549,3 +549,35 @@ class TestTimeoutOverride:
         assert "限时步骤" in results
         assert "线程池" in results["限时步骤"]["error"]
         executor.shutdown(wait=False)
+
+
+class TestTaskChainStepNames:
+    """TaskChain.step_names：按添加顺序暴露步骤名，供 GUI 显示"第 N/M 步"。"""
+
+    def test_step_names_follows_add_order(self) -> None:
+        """多个步骤按 add 顺序返回名称。"""
+        chain = TaskChain()
+        chain.add(lambda ctx: None, name="第一步")
+        chain.add(lambda ctx: None, name="第二步")
+        assert chain.step_names == ["第一步", "第二步"]
+
+    def test_step_names_defaults_to_task_decorator_name(self) -> None:
+        """未显式传 name 时取 @task 装饰器上的名字。"""
+
+        @task("默认名")
+        def _step(ctx: TaskContext) -> None:
+            pass
+
+        chain = TaskChain().add(_step)
+        assert chain.step_names == ["默认名"]
+
+    def test_step_names_empty_chain(self) -> None:
+        """空链返回空列表（不抛异常）。"""
+        assert TaskChain().step_names == []
+
+    def test_step_names_returns_copy(self) -> None:
+        """返回新列表：调用方修改不影响链内部状态。"""
+        chain = TaskChain().add(lambda ctx: None, name="A")
+        names = chain.step_names
+        names.append("污染")
+        assert chain.step_names == ["A"]
