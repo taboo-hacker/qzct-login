@@ -8,6 +8,7 @@ patch 服务函数，隔离系统命令和真实网络请求。
 """
 
 import datetime
+import importlib
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -134,8 +135,14 @@ class TestCampusLogin:
         global_config.clear()
         global_config.update(sample_config)
 
-        # patch 快照函数，保证登录流程读取到测试配置而非真实配置
-        with patch("services.campus_login.get_config_snapshot", return_value=sample_config):
+        # patch 快照函数，保证登录流程读取到测试配置而非真实配置。
+        # 用 patch.object 而非 "services.campus_login.X" 字符串目标：
+        # services/__init__.py 的 `from services.campus_login import campus_login`
+        # 会把包属性 campus_login 遮蔽成同名函数，Python 3.10–3.13 的 mock
+        # 用 getattr 逐段解析目标，会取到函数而非模块（3.14 改用 importlib
+        # 解析才不暴露该问题），故显式取模块对象。
+        campus_login_module = importlib.import_module("services.campus_login")
+        with patch.object(campus_login_module, "get_config_snapshot", return_value=sample_config):
             result = campus_login(sample_config)
             assert result is True
 
@@ -300,7 +307,9 @@ class TestCampusLoginFailures:
         """请求抛 RequestException（网络不可达）时应返回 False。"""
         from requests.exceptions import RequestException
 
-        with patch("services.campus_login.requests.Session") as mock_session:
+        # 同上：经 importlib 取模块对象，避开包属性遮蔽
+        campus_login_module = importlib.import_module("services.campus_login")
+        with patch.object(campus_login_module.requests, "Session") as mock_session:
             mock_session.return_value.__enter__.side_effect = RequestException("unreachable")
             result = campus_login(sample_config)
         assert result is False
