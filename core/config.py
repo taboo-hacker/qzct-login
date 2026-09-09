@@ -243,10 +243,13 @@ def load_config() -> str | None:
                 new_config["DATE_RULES"] = copy.deepcopy(DEFAULT_CONFIG["DATE_RULES"])
 
             # new_config 由 DEFAULT_CONFIG 深拷贝起步，COMPENSATORY_WORKDAYS/
-            # DATE_RULES 键必然存在，只需为旧配置的 DATE_RULES 补齐缺失子键
+            # DATE_RULES 键必然存在，只需为旧配置的 DATE_RULES 补齐缺失子键。
+            # 补入值必须深拷贝：直接赋值会让 new_config 的子列表/子字典与
+            # DEFAULT_CONFIG 共享同一对象，后续任何原地修改都会污染默认配置，
+            # 使同进程内之后的 load_config 读到已被污染的"默认值"
             for key in DEFAULT_CONFIG["DATE_RULES"]:
                 if key not in new_config["DATE_RULES"]:
-                    new_config["DATE_RULES"][key] = DEFAULT_CONFIG["DATE_RULES"][key]
+                    new_config["DATE_RULES"][key] = copy.deepcopy(DEFAULT_CONFIG["DATE_RULES"][key])
             if "CUSTOM_HOLIDAYS" in new_config["DATE_RULES"]:
                 new_config["DATE_RULES"]["CUSTOM_HOLIDAY_PERIODS"] = []
                 del new_config["DATE_RULES"]["CUSTOM_HOLIDAYS"]

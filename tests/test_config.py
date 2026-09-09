@@ -234,3 +234,46 @@ class TestLoadConfig:
         rules = global_config["DATE_RULES"]
         assert isinstance(rules, dict)
         assert set(rules.keys()) == set(cfg_module.DEFAULT_CONFIG["DATE_RULES"].keys())
+
+
+class TestLoadConfigDoesNotAliasDefaults:
+    """load_config 补齐 DATE_RULES 缺失子键时不得与 DEFAULT_CONFIG 共享对象。
+
+    回归：补键循环直接赋值（未深拷贝）使 global_config 的子列表与
+    DEFAULT_CONFIG 指向同一对象，任何原地修改都会污染进程内的"默认值"，
+    使同进程后续 load_config 读到被污染的默认配置。
+    """
+
+    def test_mutating_loaded_rules_does_not_poison_defaults(self, temp_config_dir: Path) -> None:
+        """修改 global_config 的补齐子键后，DEFAULT_CONFIG 应保持不变。"""
+        _write_config_file(
+            temp_config_dir / "config.json",
+            {"DATE_RULES": {"ENABLE_CUSTOM_RULE": True}},
+        )
+        assert load_config() is None
+
+        rules = global_config["DATE_RULES"]
+        assert isinstance(rules, dict)
+        rules["CUSTOM_WORKDAY_PERIODS"].append(
+            {"name": "污染", "start": "2026-01-01", "end": "2026-01-02"}
+        )
+
+        assert cfg_module.DEFAULT_CONFIG["DATE_RULES"]["CUSTOM_WORKDAY_PERIODS"] == []
+
+    def test_repeated_load_is_not_affected_by_previous_mutation(
+        self, temp_config_dir: Path
+    ) -> None:
+        """一次污染后再次 load_config 仍应得到干净默认值。"""
+        _write_config_file(
+            temp_config_dir / "config.json",
+            {"DATE_RULES": {"ENABLE_CUSTOM_RULE": True}},
+        )
+        assert load_config() is None
+        rules = global_config["DATE_RULES"]
+        assert isinstance(rules, dict)
+        rules["CUSTOM_HOLIDAY_PERIODS"].append({"name": "X", "start": "1", "end": "2"})
+
+        assert load_config() is None
+        reloaded = global_config["DATE_RULES"]
+        assert isinstance(reloaded, dict)
+        assert reloaded["CUSTOM_HOLIDAY_PERIODS"] == []
