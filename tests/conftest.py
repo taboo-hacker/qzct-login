@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QApplication
 
 # 将项目根目录加入 sys.path，使测试可直接以顶层包名导入 core/infra/gui 等模块
@@ -29,6 +30,29 @@ def ensure_qapp() -> QApplication:
     """
     app = QApplication.instance()
     return app if isinstance(app, QApplication) else QApplication([])
+
+
+def destroy_window(window: QObject | None) -> None:
+    """彻底销毁窗口并释放其全部子控件。
+
+    仅调用 ``deleteLater()`` 是不够的：它只投递一个 DeferredDelete 事件，
+    而该事件**不会**被 ``processEvents()`` 派发（Qt 只在事件循环回到主循环时
+    处理，或由调用方显式派发）。未派发时窗口与其全部子控件（一个主窗口约
+    310 个）会一直存活，导致后续每次 ``QApplication.setStyleSheet`` 都要
+    重新抛光所有存活控件，构造耗时随测试数线性增长（实测 40 次构造从
+    86ms 涨到 11s）。显式派发 DeferredDelete 后存活控件归零。
+
+    派发时以 window 为接收者，只处理该窗口自己的延迟删除事件：
+    传 None 会连带清空其他测试已排队但尚未处理的删除请求，可能让仍在
+    引用那些对象的用例拿到已析构的 C++ 对象。
+    """
+    if window is None:
+        return
+    window.deleteLater()
+    app = QApplication.instance()
+    if app is not None:
+        QApplication.sendPostedEvents(window, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 @pytest.fixture

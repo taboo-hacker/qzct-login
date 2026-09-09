@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 from pytestqt.qtbot import QtBot
 
+from tests.conftest import destroy_window as _destroy_window
 from tests.conftest import ensure_qapp as _ensure_qapp
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ class TestMainWindowSmoke:
         finally:
             sys.stdout, sys.stderr = original_out, original_err
             if window is not None:
-                window.deleteLater()
+                _destroy_window(window)
 
     def test_settings_panel_reflects_loaded_config(
         self, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -122,7 +123,7 @@ class TestMainWindowSmoke:
         finally:
             sys.stdout, sys.stderr = original_out, original_err
             if window is not None:
-                window.deleteLater()
+                _destroy_window(window)
 
     def test_status_badge_state_reflects_need_work(self, qtbot: QtBot) -> None:
         """should_work_today 返回 False/True 时，状态徽标应分别显示休息/工作态。"""
@@ -155,7 +156,7 @@ class TestMainWindowSmoke:
         finally:
             sys.stdout, sys.stderr = original_out, original_err
             if window is not None:
-                window.deleteLater()
+                _destroy_window(window)
 
 
 @pytest.fixture
@@ -192,7 +193,7 @@ def main_window(
     finally:
         sys.stdout, sys.stderr = original_out, original_err
         if window is not None:
-            window.deleteLater()
+            _destroy_window(window)
 
 
 class TestChainResultReporting:
