@@ -15,7 +15,7 @@ cd qzct-login
 
 ### 2. 创建虚拟环境
 
-推荐 Python 3.11+（项目要求 >=3.10）：
+推荐 Python 3.12+（项目要求 >=3.10，CI 测试矩阵覆盖 3.10–3.14）：
 
 ```bash
 python -m venv venv

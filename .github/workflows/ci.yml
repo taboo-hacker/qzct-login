@@ -81,7 +81,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # 3.14 为当前最新稳定版；PySide6 以 cp310-abi3 wheel 分发，
+        # 同一份二进制覆盖 3.10+，无需为 3.14 单独准备构建产物
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: 检出代码
