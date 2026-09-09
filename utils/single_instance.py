@@ -16,12 +16,17 @@
     window.show()
 """
 
+import time
 from collections.abc import Callable
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 SERVER_NAME = "qzct-login-single-instance"
+
+# 等待"show"消息写入管道的最长时间（秒）。写缓冲正常毫秒级排空；
+# 超过该时长说明管道异常，此时放弃等待直接断开，避免二次启动卡住。
+_SEND_TIMEOUT_SEC = 1.0
 
 
 def listen_single_instance(show_callback: Callable[[], None]) -> QLocalServer | None:
@@ -41,16 +46,21 @@ def listen_single_instance(show_callback: Callable[[], None]) -> QLocalServer | 
     socket.connectToServer(SERVER_NAME)
     if socket.waitForConnected(200):
         # 已有实例：发送"显示"通知后断开。
-        # Windows 下 QLocalSocket 的阻塞等待不会推进写缓冲，需泵事件循环直至
-        # 消息真正写入管道，否则本函数返回后 socket 被回收将丢弃未发送数据。
+        # 必须等写缓冲真正排空再断开，否则 disconnectFromServer 会丢弃尚未
+        # 写入管道的数据，用户双击图标唤不起已运行实例的窗口。
+        # 排空只能靠 processEvents 推进（实测 QLocalSocket.waitForBytesWritten
+        # 在 Windows 上返回 False 且不减少 bytesToWrite），因此等待用**墙钟截止**
+        # 而非固定轮次：事件队列繁忙时每轮 processEvents 可能被其他事件占用，
+        # 固定 10 轮会在消息尚未发出时提前放弃（该缺陷在测试套件加速后才稳定复现）。
         socket.write(b"show")
         socket.flush()
         app = QCoreApplication.instance()
-        if app is not None:
-            for _ in range(10):
-                app.processEvents()
-                if socket.bytesToWrite() == 0:
-                    break
+        deadline = time.monotonic() + _SEND_TIMEOUT_SEC
+        while socket.bytesToWrite() > 0 and time.monotonic() < deadline:
+            if app is None:
+                break
+            app.processEvents()
+            time.sleep(0.002)
         socket.disconnectFromServer()
         return None
 
