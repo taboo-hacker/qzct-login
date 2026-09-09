@@ -61,6 +61,8 @@ def _cleanup_legacy_files() -> None:
 #   SHUTDOWN_HOUR/MIN         定时关机时间（24 小时制）
 #   AUTOSTART                 开机自启开关（当前版本未实现写注册表，保留字段）
 #   THEME                     界面主题（light/dark）
+#   ACTIVE_TAB                退出时停留的标签页标识（log/settings/calendar，见 TAB_NAMES）
+#   WINDOW_GEOMETRY           窗口几何（QMainWindow.saveGeometry 的 base64），空串=用默认尺寸
 #   SHOW_LUNAR_CALENDAR       万年历是否显示农历/宜忌等详情
 #   LUNAR_DISPLAY_FORMAT      农历显示格式（0=简化 / 1=完整）
 #   HOLIDAY_PERIODS           节假日区间（含寒暑假），来源 core/holidays.py
@@ -79,6 +81,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "SHUTDOWN_MIN": 0,
     "AUTOSTART": False,
     "THEME": "light",
+    # 界面状态持久化：退出时写回，下次启动还原，避免每次都重新调整窗口与标签页
+    "ACTIVE_TAB": "log",
+    "WINDOW_GEOMETRY": "",
     "SHOW_LUNAR_CALENDAR": True,
     "LUNAR_DISPLAY_FORMAT": 0,
     "HOLIDAY_PERIODS": HOLIDAY_PERIODS,

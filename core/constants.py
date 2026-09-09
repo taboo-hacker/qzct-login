@@ -68,6 +68,15 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 LOG_FILE = os.path.join(CONFIG_DIR, "qzct.log")
 
 # ==========================================
+# 界面状态持久化
+# ==========================================
+# 主界面标签页标识（顺序即 QTabWidget 索引顺序）：
+# 配置项 ACTIVE_TAB 的取值域由本元组唯一确定，GUI 层据此把标识还原成索引。
+# 放在 core 层而非 gui 层，是因为配置校验（core/config_validator.py）
+# 需要引用同一份值域，避免两处各写一份而漂移。
+TAB_NAMES: tuple[str, ...] = ("log", "settings", "calendar")
+
+# ==========================================
 # 子进程调用
 # ==========================================
 # 子进程创建标志：打包版为 console=False 的 GUI 进程，subprocess 调用控制台程序

@@ -13,9 +13,13 @@
 import copy
 from typing import Any
 
-from core.constants import ISP_MAPPING
+from core.constants import ISP_MAPPING, TAB_NAMES
 from infra.date_utils import parse_date_str
 from infra.logging import warning
+
+# WINDOW_GEOMETRY 合法长度上限（字符）：Qt 的 saveGeometry 实际输出约 100~200 字节，
+# base64 后不超过 400 字符；超过说明字段被外部写入垃圾数据，回退默认尺寸
+_WINDOW_GEOMETRY_MAX_LEN = 1024
 
 
 def _default(field: str) -> Any:
@@ -58,6 +62,9 @@ _SCHEMA: dict[str, tuple[type, Any]] = {
     "SHUTDOWN_MIN": (int, lambda v: 0 <= v <= 59),
     "AUTOSTART": (bool, None),
     "THEME": (str, lambda v: v in ("light", "dark")),
+    "ACTIVE_TAB": (str, lambda v: v in TAB_NAMES),
+    # 窗口几何是不透明的 base64 串，长度上限防御异常膨胀的配置文件
+    "WINDOW_GEOMETRY": (str, lambda v: len(v) <= _WINDOW_GEOMETRY_MAX_LEN),
     "SHOW_LUNAR_CALENDAR": (bool, None),
     "LUNAR_DISPLAY_FORMAT": (int, lambda v: v in (0, 1)),
 }

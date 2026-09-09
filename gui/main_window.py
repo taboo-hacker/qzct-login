@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QCloseEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -25,8 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from core.config import get_config_snapshot, global_config, load_config
-from core.constants import CONFIG_FILE, LOG_FILE
+from core.config import get_config_snapshot, global_config, load_config, save_config
+from core.constants import CONFIG_FILE, LOG_FILE, TAB_NAMES
 from core.date_rules import describe_source, rule_source, should_work_today
 from gui.dialogs import AboutDialog, SettingsPanel
 from gui.log_sink import QtLogSink
@@ -39,6 +39,7 @@ from infra import (
     error,
     info,
     init_logger,
+    warning,
 )
 from infra.concurrency import TaskChain, TaskContext, TaskExecutor
 from services.campus_login import campus_login
@@ -127,6 +128,10 @@ class MainWindow(QMainWindow):
         # 这里不再重复调用
         self._init_ui()
 
+        # 还原上次退出时的窗口几何与标签页（须在 show() 之前调用，
+        # 否则窗口会先以默认尺寸闪现一次再跳变）
+        self._restore_window_state()
+
         # 重定向输出
         self._original_stdout = sys.stdout
         self._original_stderr = sys.stderr
@@ -190,6 +195,50 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+K"), self, self.show_calendar)
 
         self._update_status_display()
+
+    # ------------------------------------------------------------------
+    # 窗口状态持久化
+    # ------------------------------------------------------------------
+
+    def _restore_window_state(self) -> None:
+        """还原上次退出时的窗口几何与标签页。
+
+        数据来自 config.json（ACTIVE_TAB / WINDOW_GEOMETRY），损坏或越界时
+        静默回退默认值——界面状态属易失数据，不值得用弹窗打断启动。
+        """
+        encoded = str(global_config.get("WINDOW_GEOMETRY", "") or "")
+        if encoded:
+            try:
+                raw = QByteArray.fromBase64(encoded.encode("ascii"))
+            except (UnicodeEncodeError, ValueError):
+                raw = QByteArray()
+            # restoreGeometry 返回 False 表示数据不可用（含跨屏位置失效），
+            # 此时窗口保持 __init__ 里的默认尺寸，无需额外处理
+            if not raw.isEmpty() and not self.restoreGeometry(raw):
+                warning("main", "窗口几何数据无效，使用默认尺寸")
+
+        tab = str(global_config.get("ACTIVE_TAB", TAB_NAMES[0]) or TAB_NAMES[0])
+        if tab in TAB_NAMES:
+            index = TAB_NAMES.index(tab)
+            if 0 <= index < self.main_tabs.count():
+                self.main_tabs.setCurrentIndex(index)
+
+    def _save_window_state(self) -> None:
+        """把窗口几何与当前标签页写回配置并落盘（真实退出时调用）。
+
+        整个函数尽力而为：写盘失败只记日志，绝不阻断退出流程。
+        """
+        try:
+            # 真实存根下 data() 返回 bytes|bytearray|memoryview 联合类型，
+            # 统一 bytes(...) 收敛后再解码（三种类型均满足 Buffer 协议）
+            geometry = bytes(self.saveGeometry().toBase64().data()).decode("ascii")
+            global_config["WINDOW_GEOMETRY"] = geometry
+            index = self.main_tabs.currentIndex()
+            if 0 <= index < len(TAB_NAMES):
+                global_config["ACTIVE_TAB"] = TAB_NAMES[index]
+            save_config()
+        except Exception as exc:  # noqa: BLE001 - 退出路径不得因持久化失败而中断
+            warning("main", f"窗口状态保存失败：{exc}")
 
     @staticmethod
     def _h_line() -> QFrame:
@@ -970,6 +1019,10 @@ class MainWindow(QMainWindow):
             ex.cancel_all()
             ex.shutdown(wait=False)
         self._test_executors.clear()
+
+        # 持久化窗口几何与标签页：仅在真实退出路径执行，托盘最小化
+        # （上方 event.ignore() 分支）不写盘，避免频繁无意义 IO
+        self._save_window_state()
 
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr

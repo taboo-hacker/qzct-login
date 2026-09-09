@@ -159,11 +159,21 @@ class TestMainWindowSmoke:
 
 
 @pytest.fixture
-def main_window(qtbot: QtBot) -> Iterator["MainWindow"]:
-    """构造打桩后的主窗口：日志/托盘/配置加载全部 mock，测试后恢复标准流。"""
+def main_window(
+    qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator["MainWindow"]:
+    """构造打桩后的主窗口：日志/托盘/配置加载全部 mock，测试后恢复标准流。
+
+    CONFIG_FILE 重定向到 tmp_path：退出路径会调用 save_config() 持久化窗口
+    几何与标签页，若不隔离会把测试用的 global_config 写进开发者真实配置。
+    """
     from unittest.mock import patch
 
+    import core.config as cfg_module
     from gui.main_window import MainWindow
+
+    monkeypatch.setattr(cfg_module, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(cfg_module, "CONFIG_FILE", str(tmp_path / "config.json"))
 
     _ensure_qapp()
     original_out, original_err = sys.stdout, sys.stderr
@@ -780,3 +790,64 @@ class TestFooterTooltip:
         main_window._on_chain_error({})
         assert main_window.footer_status.text() == "任务链执行失败"
         assert main_window.footer_status.toolTip() == "任务链执行失败"
+
+
+class TestWindowStatePersistence:
+    """窗口几何与标签页持久化：退出写回配置，启动还原。
+
+    回归：此前无任何 saveGeometry/restoreGeometry，用户每次启动都要
+    重新调整窗口大小与位置，并总是被带回"运行日志"标签页。
+    """
+
+    def test_save_writes_geometry_and_active_tab(
+        self, main_window: "MainWindow", tmp_path: Path
+    ) -> None:
+        """_save_window_state 应写入几何串、当前标签页并落盘。"""
+        from core.config import global_config
+
+        main_window.main_tabs.setCurrentIndex(2)  # 任务日历
+        main_window._save_window_state()
+
+        assert global_config["ACTIVE_TAB"] == "calendar"
+        assert str(global_config["WINDOW_GEOMETRY"]) != ""
+        assert (tmp_path / "config.json").exists(), "退出路径应把状态落盘"
+
+    def test_restore_selects_saved_tab(self, main_window: "MainWindow") -> None:
+        """_restore_window_state 按 ACTIVE_TAB 还原标签页索引。"""
+        from core.config import global_config
+
+        global_config["ACTIVE_TAB"] = "settings"
+        main_window._restore_window_state()
+
+        assert main_window.main_tabs.currentIndex() == 1
+
+    def test_restore_keeps_current_tab_on_unknown_value(self, main_window: "MainWindow") -> None:
+        """未知标签页标识应忽略，不改变当前标签页。"""
+        from core.config import global_config
+
+        main_window.main_tabs.setCurrentIndex(1)
+        global_config["ACTIVE_TAB"] = "不存在的标签页"
+        main_window._restore_window_state()
+
+        assert main_window.main_tabs.currentIndex() == 1
+
+    def test_restore_survives_corrupt_geometry(self, main_window: "MainWindow") -> None:
+        """几何串损坏（非 base64）时不得抛异常，回退默认尺寸。"""
+        from core.config import global_config
+
+        global_config["WINDOW_GEOMETRY"] = "!!!not-valid-base64!!!"
+        main_window._restore_window_state()  # 不应抛异常
+
+        assert main_window.width() > 0
+
+    def test_save_failure_does_not_interrupt_exit(
+        self, main_window: "MainWindow", monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """落盘失败时 _save_window_state 应吞掉异常，不阻断退出流程。"""
+        import gui.main_window as mw_module
+
+        def _boom() -> bool:
+            raise OSError("磁盘已满")
+
+        monkeypatch.setattr(mw_module, "save_config", _boom)
+        main_window._save_window_state()  # 不应抛异常

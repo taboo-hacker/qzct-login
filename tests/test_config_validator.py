@@ -412,3 +412,63 @@ class TestMalformedPeriodsShouldWorkTodayRegression:
         assert should_work_today(datetime.date(2026, 1, 5)) is False
         # 2026-01-04 周日命中清洗后保留的调休上班日 -> True
         assert should_work_today(datetime.date(2026, 1, 4)) is True
+
+
+class TestInterfaceStateFields:
+    """界面状态持久化字段（ACTIVE_TAB / WINDOW_GEOMETRY）的校验。
+
+    这两个字段由 gui 层在退出时写入，用户手工编辑配置时可能写坏，
+    校验需保证坏值回退默认而非导致启动异常。
+    """
+
+    def test_active_tab_valid_values_kept(self) -> None:
+        """TAB_NAMES 内的标签页标识应原样保留。"""
+        from core.constants import TAB_NAMES
+
+        for tab in TAB_NAMES:
+            config = copy.deepcopy(DEFAULT_CONFIG)
+            config["ACTIVE_TAB"] = tab
+            assert "ACTIVE_TAB" not in validate_config(config)
+            assert config["ACTIVE_TAB"] == tab
+
+    def test_active_tab_unknown_value_resets(self) -> None:
+        """未知标签页标识应回退默认值。"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["ACTIVE_TAB"] = "不存在的标签页"
+
+        fixed = validate_config(config)
+        assert "ACTIVE_TAB" in fixed
+        assert config["ACTIVE_TAB"] == DEFAULT_CONFIG["ACTIVE_TAB"]
+
+    def test_active_tab_wrong_type_resets(self) -> None:
+        """非字符串类型应回退默认值。"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["ACTIVE_TAB"] = 1
+
+        fixed = validate_config(config)
+        assert "ACTIVE_TAB" in fixed
+        assert config["ACTIVE_TAB"] == DEFAULT_CONFIG["ACTIVE_TAB"]
+
+    def test_window_geometry_empty_string_allowed(self) -> None:
+        """空串是合法的"未保存"状态（首次启动）。"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["WINDOW_GEOMETRY"] = ""
+        assert "WINDOW_GEOMETRY" not in validate_config(config)
+
+    def test_window_geometry_overlong_value_resets(self) -> None:
+        """异常超长的几何串应回退默认值，防止配置文件被灌入垃圾数据。"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["WINDOW_GEOMETRY"] = "A" * 2000
+
+        fixed = validate_config(config)
+        assert "WINDOW_GEOMETRY" in fixed
+        assert config["WINDOW_GEOMETRY"] == DEFAULT_CONFIG["WINDOW_GEOMETRY"]
+
+    def test_window_geometry_wrong_type_resets(self) -> None:
+        """非字符串类型应回退默认值。"""
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["WINDOW_GEOMETRY"] = ["not", "a", "string"]
+
+        fixed = validate_config(config)
+        assert "WINDOW_GEOMETRY" in fixed
+        assert config["WINDOW_GEOMETRY"] == DEFAULT_CONFIG["WINDOW_GEOMETRY"]
