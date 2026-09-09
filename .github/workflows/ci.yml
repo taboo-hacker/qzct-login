@@ -70,7 +70,12 @@ jobs:
           pip install pip-audit
 
       - name: 依赖安全扫描（审计已安装的全部包，含传递依赖）
-        run: pip-audit --strict --desc
+        # 先卸载本项目自身的可编辑安装：qzct-login 未发布到 PyPI，
+        # --strict 会把「无法审计该依赖」判为失败，导致该任务自 v1.5.x 起
+        # 长期为红（与真实 CVE 无关）。卸载后审计范围仍是全部第三方依赖。
+        run: |
+          pip uninstall -y qzct-login
+          pip-audit --strict --desc
 
   test:
     name: 测试

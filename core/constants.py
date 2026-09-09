@@ -11,7 +11,6 @@
 
 import os
 import subprocess
-import sys
 from typing import Any
 
 # ==========================================
@@ -82,7 +81,10 @@ TAB_NAMES: tuple[str, ...] = ("log", "settings", "calendar")
 # 子进程创建标志：打包版为 console=False 的 GUI 进程，subprocess 调用控制台程序
 # （netsh/shutdown）默认会新开控制台窗口、在屏幕上闪黑框；CREATE_NO_WINDOW 抑制之。
 # 该标志仅 Windows 存在，其他平台用 0 保持默认行为（跨平台测试可运行）。
-SUBPROCESS_NO_WINDOW: int = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+# 用 getattr 取值而非直接属性访问：CI 在 ubuntu 上执行 mypy . 时，
+# subprocess.CREATE_NO_WINDOW 不存在会报 attr-defined；且该报错无法靠
+# "if sys.platform == 'win32'" 分支规避——mypy 仍会检查条件表达式两侧。
+SUBPROCESS_NO_WINDOW: int = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 # 子进程命令超时（秒）：统一收口，避免魔法数字散落各服务
 NETSH_TIMEOUT_SEC = 15  # netsh 查询/加载 profile/发起连接
