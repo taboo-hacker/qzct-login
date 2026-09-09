@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QTextEdit, QWidget
 from pytestqt.qtbot import QtBot
 
 from gui.log_sink import QtLogSink
+from gui.styling.widgets import append_preserving_scroll
 from tests.conftest import ensure_qapp as _ensure_qapp
 
 if TYPE_CHECKING:
@@ -457,15 +458,17 @@ class TestQtLogSink:
         QApplication.processEvents()
 
 
-class TestQtLogSinkScrollPreservation:
-    """QtLogSink 追加日志时的滚动策略：上滚查阅历史时视图不被拽走。
+class TestAppendPreservingScroll:
+    """append_preserving_scroll：追加内容时按用户滚动位置决定是否跟随。
 
-    回归：此前 _safe_append_to_gui 每条日志都无条件 ensureCursorVisible()，
-    且 setTextCursor 本身也会把视图滚到游标处，用户无法在任务运行期间
-    阅读已被刷走的历史日志。
+    回归：QtLogSink._safe_append_to_gui 此前每条日志都无条件
+    ensureCursorVisible()，且 setTextCursor 本身也会把视图滚到游标处，
+    用户无法在任务运行期间阅读已被刷走的历史日志。
 
-    用例使用独立 sink 实例（而非全局单例）：单例在测试间重置会与
-    pytest-qt 已销毁的控件残留连接冲突，且被测逻辑与单例无关。
+    用例直接调用该函数而非构造 QtLogSink 实例：局部 QObject 在测试
+    teardown 被回收时，会与 qtbot 销毁控件产生竞态，在 Linux offscreen
+    平台触发段错误（退出码 139）。QtLogSink 自身的桥接逻辑由本文件
+    既有的 TestQtLogSink 覆盖，此处只验证滚动策略。
     """
 
     def _filled_edit(self, qtbot: QtBot) -> QTextEdit:
@@ -480,31 +483,27 @@ class TestQtLogSinkScrollPreservation:
         QApplication.processEvents()
         return widget
 
-    def test_write_preserves_scroll_when_scrolled_up(self, qtbot: QtBot) -> None:
-        """用户上滚到顶部后写入日志，滚动位置应保持不变。"""
+    def test_preserves_scroll_when_scrolled_up(self, qtbot: QtBot) -> None:
+        """用户上滚到顶部后追加内容，滚动位置应保持不变。"""
         widget = self._filled_edit(qtbot)
         scrollbar = widget.verticalScrollBar()
         assert scrollbar.maximum() > 0, "测试前置条件：内容需足以产生滚动条"
         scrollbar.setValue(0)
         before = scrollbar.value()
 
-        sink = QtLogSink()
-        sink.set_widget(widget)
-        sink.write("new line\n")
+        append_preserving_scroll(widget, lambda cursor: cursor.insertText("new line\n"))
         QApplication.processEvents()
 
-        assert scrollbar.value() == before, "写入日志不应把用户拽回底部"
+        assert scrollbar.value() == before, "追加内容不应把用户拽回底部"
         assert "new line" in widget.toPlainText()
 
-    def test_write_follows_when_at_bottom(self, qtbot: QtBot) -> None:
-        """用户贴着底部时，写入日志应继续跟随到最新一行。"""
+    def test_follows_when_at_bottom(self, qtbot: QtBot) -> None:
+        """用户贴着底部时，追加内容应继续跟随到最新一行。"""
         widget = self._filled_edit(qtbot)
         scrollbar = widget.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-        sink = QtLogSink()
-        sink.set_widget(widget)
-        sink.write("new line\n")
+        append_preserving_scroll(widget, lambda cursor: cursor.insertText("new line\n"))
         QApplication.processEvents()
 
         assert scrollbar.maximum() - scrollbar.value() <= 4
