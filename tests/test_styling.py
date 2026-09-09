@@ -6,6 +6,7 @@ create_card_widget/create_tip_label）、LogTextEdit 彩色日志控件、
 ThemeManager 主题切换/注册，以及 build_qss 全局样式表的生成。
 """
 
+from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
 from gui.styling.theme_manager import ThemeManager
@@ -17,6 +18,7 @@ from gui.styling.widgets import (
     create_label,
     create_section_title,
     create_tip_label,
+    is_scrolled_to_bottom,
 )
 from tests.conftest import ensure_qapp as _ensure_qapp
 
@@ -360,3 +362,61 @@ class TestBuildQssFgAndFocus:
             qss = build_qss(theme)
             assert "QPushButton:focus" in qss, f"{theme.name}: 缺少 QPushButton:focus 规则"
             assert "QTabBar::tab:focus" in qss, f"{theme.name}: 缺少 QTabBar::tab:focus 规则"
+
+
+class TestLogSmartScroll:
+    """日志自动滚动策略：贴着底部才跟随，上滚查阅历史时不被拽回。
+
+    回归：此前每条日志都无条件 ensureCursorVisible()，任务运行期间
+    日志密集刷屏，用户上滚查看出错历史会被不断拽回底部。
+    """
+
+    def _make_scrolled_edit(self, qtbot: QtBot) -> LogTextEdit:
+        """构造一个已填充多行、且滚动条可滚动的日志控件。"""
+        _ensure_qapp()
+        edit = LogTextEdit()
+        qtbot.addWidget(edit)
+        edit.resize(240, 80)
+        edit.show()
+        for idx in range(200):
+            edit.append_colored(f"line {idx}", "INFO")
+        QApplication.processEvents()
+        return edit
+
+    def test_is_scrolled_to_bottom_true_on_fresh_widget(self, qtbot: QtBot) -> None:
+        """空控件滚动条无内容，应视为在底部（首条日志需要跟随滚动）。"""
+        _ensure_qapp()
+        edit = LogTextEdit()
+        qtbot.addWidget(edit)
+        assert is_scrolled_to_bottom(edit) is True
+
+    def test_is_scrolled_to_bottom_false_after_scrolling_up(self, qtbot: QtBot) -> None:
+        """上滚到顶部后不应判定为在底部。"""
+        edit = self._make_scrolled_edit(qtbot)
+        scrollbar = edit.verticalScrollBar()
+        assert scrollbar.maximum() > 0, "测试前置条件：内容需足以产生滚动条"
+        scrollbar.setValue(0)
+        assert is_scrolled_to_bottom(edit) is False
+
+    def test_append_keeps_position_when_scrolled_up(self, qtbot: QtBot) -> None:
+        """用户上滚后追加日志，滚动位置应保持不变。"""
+        edit = self._make_scrolled_edit(qtbot)
+        scrollbar = edit.verticalScrollBar()
+        scrollbar.setValue(0)
+        before = scrollbar.value()
+
+        edit.append_colored("new line while reading history", "INFO")
+        QApplication.processEvents()
+
+        assert scrollbar.value() == before, "追加日志不应把用户拽回底部"
+
+    def test_append_follows_when_at_bottom(self, qtbot: QtBot) -> None:
+        """用户贴着底部时，追加日志应继续跟随到最新一行。"""
+        edit = self._make_scrolled_edit(qtbot)
+        scrollbar = edit.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+        edit.append_colored("new line while following", "INFO")
+        QApplication.processEvents()
+
+        assert is_scrolled_to_bottom(edit) is True

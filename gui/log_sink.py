@@ -20,6 +20,8 @@ from typing import Any, Optional
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QTextEdit
 
+from gui.styling.widgets import append_preserving_scroll
+
 
 class QtLogSink(QObject):
     """
@@ -99,13 +101,13 @@ class QtLogSink(QObject):
             self._safe_append_to_gui(self._gui_widget, message)
 
     def _safe_append_to_gui(self, widget: QTextEdit, message: str) -> None:
-        """安全地向 GUI 追加日志，widget 已销毁时静默丢弃。"""
+        """安全地向 GUI 追加日志，widget 已销毁时静默丢弃。
+
+        滚动策略统一交给 append_preserving_scroll：用户上滚查阅历史时
+        不被新日志拽回底部（任务运行期间日志密集刷屏，否则无法阅读）。
+        """
         try:
-            cursor = widget.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            cursor.insertText(message)
-            widget.setTextCursor(cursor)
-            widget.ensureCursorVisible()
+            append_preserving_scroll(widget, lambda cursor: cursor.insertText(message))
         except RuntimeError:
             # widget 的 C++ 对象已被销毁
             self._gui_widget = None

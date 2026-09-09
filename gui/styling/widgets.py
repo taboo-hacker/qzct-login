@@ -6,9 +6,10 @@
 """
 
 import html
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor, QFont
+from PySide6.QtGui import QCursor, QFont, QTextCursor
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QTextEdit, QWidget
 
 from gui.styling.constants import FontSize, FontStyle
@@ -128,6 +129,9 @@ class LogTextEdit(QTextEdit):
         文本先经 html.escape 转义再嵌入 <span>，防止日志内容中的
         <、& 等字符破坏富文本结构（日志常含 URL/异常堆栈）。
 
+        追加后仅在用户原本就贴着底部时自动滚动；用户上滚查阅历史时
+        保持其阅读位置，不被新日志拽走（见 is_scrolled_to_bottom）。
+
         Args:
             text: 日志文本
             level: DEBUG/INFO/WARNING/ERROR/CRITICAL
@@ -142,13 +146,54 @@ class LogTextEdit(QTextEdit):
         }
         color = color_map.get(level, theme.log_info)
 
-        cursor = self.textCursor()
-        cursor.movePosition(cursor.MoveOperation.End)
-
         # 转义日志文本，防止 <、& 等字符破坏 HTML 结构或注入标签
         escaped = html.escape(text)
         snippet = f'<span style="color: {color};">{escaped}</span>'
-        cursor.insertHtml(snippet + "<br>")
+        append_preserving_scroll(self, lambda cursor: cursor.insertHtml(snippet + "<br>"))
 
-        self.setTextCursor(cursor)
-        self.ensureCursorVisible()
+
+def is_scrolled_to_bottom(widget: QTextEdit, tolerance: int = 4) -> bool:
+    """判断文本控件的滚动条是否已贴近底部。
+
+    用于日志追加时决定是否自动滚动：用户在底部时跟随最新日志（常见期望），
+    用户已上滚查阅历史时保持其位置（否则每条新日志都会把视图拽回底部）。
+
+    Args:
+        widget: 目标文本控件
+        tolerance: 视为"到底"的像素容差，吸收字体行高与滚动精度误差
+
+    Returns:
+        bool: 滚动条距底部不超过 tolerance 像素时为 True
+    """
+    scrollbar = widget.verticalScrollBar()
+    # bool(...) 收敛返回类型：无存根环境下 verticalScrollBar() 推断为 Any，
+    # 真实存根下为 QScrollBar，两种 mypy 模式都要得到 bool
+    return bool(scrollbar.maximum() - scrollbar.value() <= tolerance)
+
+
+def append_preserving_scroll(widget: QTextEdit, insert: Callable[[QTextCursor], None]) -> None:
+    """在文档末尾插入内容，并按用户当前滚动位置决定是否跟随到最新内容。
+
+    必须由本函数统一处理滚动，原因有二：
+    1. 是否"在底部"要在插入前判断——插入后滚动条最大值已变大，
+       再判断必然得出"不在底部"；
+    2. ``setTextCursor`` 本身就会把视图滚动到游标处，仅去掉
+       ``ensureCursorVisible`` 并不足以保留用户的阅读位置，还需还原滚动值。
+
+    Args:
+        widget: 目标文本控件
+        insert: 接收已定位到文档末尾的游标，执行实际插入（纯文本或 HTML）
+    """
+    stick_to_bottom = is_scrolled_to_bottom(widget)
+    scroll_value = widget.verticalScrollBar().value()
+
+    cursor = widget.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    insert(cursor)
+    widget.setTextCursor(cursor)
+
+    if stick_to_bottom:
+        widget.ensureCursorVisible()
+    else:
+        # 还原到插入前的滚动位置，用户上滚查阅历史时视图不被拽走
+        widget.verticalScrollBar().setValue(scroll_value)
