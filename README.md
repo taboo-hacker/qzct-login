@@ -3,7 +3,7 @@
 🚀 自动登录校园网络，让网络连接更简单！
 
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-blue.svg)](LICENSE)
-[![Version: 1.5.3](https://img.shields.io/badge/Version-1.5.3-blue.svg)](pyproject.toml)
+[![Version: 1.6.0](https://img.shields.io/badge/Version-1.6.0-blue.svg)](pyproject.toml)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](pyproject.toml)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-purple.svg)](README.md)
 
@@ -147,6 +147,17 @@ qzct-login/
 - [代码 Wiki](CODE_WIKI.md) - 项目架构和 API 文档
 
 ## 🔄 更新日志
+
+### v1.6.0 (2026-09-09)
+
+- ✨ 新增窗口状态持久化：退出时记住窗口大小/位置与所在标签页，下次启动原样还原（此前每次启动都要重新调整窗口并回到「运行日志」页）
+- ✨ 新增任务链进度反馈：状态栏显示「正在执行：连接WiFi（第 2/4 步）」与单步耗时，长耗时的 WiFi 重试期间不再停在上一步的「完成」文案
+- ✨ 失败提示可操作化：WiFi/登录/关机失败时直接给出排查入口（如「请到设置核对 WiFi 名称与密码」），无需翻日志找原因
+- 🐛 修复：日志自动滚动打断阅读——上滚查阅历史时新日志不再把视图拽回底部
+- 🐛 修复：重复启动偶尔唤不起已运行实例的窗口（写缓冲未排空即断开，消息被丢弃）
+- 🐛 修复：配置加载补齐 DATE_RULES 子键时未深拷贝，可能污染进程内默认配置
+- 🧪 测试：修复窗口销毁泄漏导致的套件退化（`deleteLater` 未派发 DeferredDelete，控件持续累积使 `setStyleSheet` 越来越慢），全量耗时 182s → 45s；消除单实例用例 1/5 的随机失败
+- 🧪 测试用例 417 → 448，覆盖率 83.26% → 83.63%
 
 ### v1.5.3 (2026-08-15)
 
