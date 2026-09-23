@@ -1,0 +1,17 @@
+{
+  "locks": [
+    {"file": "gui/styling/qss.py", "owner": "TB1", "status": "LOCKED"},
+    {"file": "gui/styling/themes.py", "owner": "TB1", "status": "LOCKED"},
+    {"file": "tests/test_styling.py", "owner": "TB1", "status": "LOCKED"},
+    {"file": "infra/date_utils.py", "owner": "TB2", "status": "LOCKED"},
+    {"file": "gui/widgets/date_rule_widget.py", "owner": "TB2", "status": "LOCKED"},
+    {"file": "gui/widgets/holiday_widget.py", "owner": "TB2", "status": "LOCKED"},
+    {"file": "gui/widgets/compensatory_widget.py", "owner": "TB2", "status": "LOCKED"},
+    {"file": "gui/dialogs/period_edit_dialog.py", "owner": "TB2", "status": "LOCKED"},
+    {"file": "gui/dialogs/settings_panel.py", "owner": "TB2", "status": "LOCKED"},
+    {"file": "gui/main_window.py", "owner": "TB3", "status": "LOCKED"},
+    {"file": "tests/test_main_window.py", "owner": "TB3", "status": "LOCKED"},
+    {"file": "gui/widgets/calendar_view.py", "owner": "TB4", "status": "LOCKED"},
+    {"file": "tests/test_calendar_view.py", "owner": "TB4", "status": "LOCKED"}
+  ]
+}
