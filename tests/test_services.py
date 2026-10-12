@@ -384,3 +384,16 @@ class TestTaskFailureBranches:
             result = task_set_shutdown(ctx)
         assert result["shutdown_set"] is False
         assert result["reason"] == "command_failed"
+
+
+def test_disabled_shutdown_never_calls_system_command() -> None:
+    from unittest.mock import patch
+
+    from core.config import global_config
+
+    global_config["SHUTDOWN_ENABLED"] = False
+    ctx = TaskContext("设置定时关机")
+    with patch("services.tasks.set_shutdown_timer") as shutdown:
+        result = task_set_shutdown(ctx)
+        shutdown.assert_not_called()
+    assert result["reason"] == "disabled"
