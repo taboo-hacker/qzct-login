@@ -293,7 +293,7 @@ class TestRunOnStart:
         from core.config import global_config
 
         main_window._task_chain_started = False
-        global_config.update({"USERNAME": "20230001", "WIFI_NAME": "DormWiFi"})
+        global_config.update({"USERNAME": "20230001", "PASSWORD": "test", "WIFI_NAME": "DormWiFi"})
         with patch("gui.main_window.QTimer.singleShot") as mock_shot:
             main_window.run_on_start()
             mock_shot.assert_called_once()
@@ -306,7 +306,7 @@ class TestRunOnStart:
 
         main_window._task_chain_started = False
         with patch("gui.main_window.QTimer.singleShot") as mock_shot:
-            global_config.update({"USERNAME": "20230001"})
+            global_config.update({"USERNAME": "20230001", "PASSWORD": "test"})
             main_window.run_on_start()
             main_window.run_on_start()
             assert mock_shot.call_count == 1
@@ -436,18 +436,21 @@ class TestTaskBusyFlag:
 class TestConfirmDialogDefaults:
     """统一确认框 _confirm：各调用点的默认按钮语义与既有行为保持一致。"""
 
-    def test_run_once_confirm_defaults_to_no(self, main_window: "MainWindow") -> None:
+    def test_routine_confirm_defaults_to_no(self, main_window: "MainWindow") -> None:
         """「立即执行」确认框默认聚焦"否"（危险操作，回车不直接放行）。"""
         from unittest.mock import patch
 
         from PySide6.QtWidgets import QMessageBox
 
+        from core.config import global_config
+
+        global_config.update({"USERNAME": "test", "PASSWORD": "test", "SHUTDOWN_ENABLED": True})
         no = QMessageBox.StandardButton.No
         with (
             patch("gui.main_window.QMessageBox.question", return_value=no) as mock_q,
             patch.object(type(main_window), "start_task_chain") as mock_start,
         ):
-            main_window.on_run_once()
+            main_window.on_run_routine()
             mock_q.assert_called_once()
             assert mock_q.call_args.args[4] is QMessageBox.StandardButton.No
             mock_start.assert_not_called()
@@ -936,3 +939,71 @@ class TestFailureHints:
         main_window._on_chain_success(True, results)
 
         assert "请到「设置」" not in main_window.footer_status.text()
+
+
+class TestDailyLoginFlow:
+    def test_manual_login_has_no_confirmation(self, main_window: "MainWindow") -> None:
+        from unittest.mock import patch
+
+        from core.config import global_config
+
+        global_config.update({"USERNAME": "test", "PASSWORD": "test"})
+        with (
+            patch.object(main_window, "start_task_chain") as start,
+            patch("gui.main_window.QMessageBox.question") as question,
+        ):
+            main_window.on_run_once()
+            start.assert_called_once_with(login_only=True)
+            question.assert_not_called()
+
+    @pytest.mark.parametrize("shutdown_enabled", [False, True])
+    def test_manual_chain_excludes_rules_and_shutdown(
+        self, main_window: "MainWindow", shutdown_enabled: bool
+    ) -> None:
+        from unittest.mock import patch
+
+        from core.config import global_config
+        from services.tasks import task_campus_login, task_check_condition, task_set_shutdown
+
+        global_config["SHUTDOWN_ENABLED"] = shutdown_enabled
+        with patch("gui.main_window.TaskChain") as factory, patch("gui.main_window.TaskExecutor"):
+            main_window.start_task_chain(login_only=True)
+            steps = [call.args[0] for call in factory.return_value.add.call_args_list]
+            assert task_check_condition not in steps
+            assert task_set_shutdown not in steps
+            assert task_campus_login in steps
+
+    def test_missing_password_opens_login_settings(self, main_window: "MainWindow") -> None:
+        from unittest.mock import patch
+
+        from core.config import global_config
+
+        global_config.update({"USERNAME": "test", "PASSWORD": ""})
+        with patch.object(main_window, "start_task_chain") as start:
+            main_window.on_run_once()
+            start.assert_not_called()
+        assert main_window.main_tabs.currentIndex() == 1
+        assert main_window._settings_panel.tab_widget is not None
+        assert main_window._settings_panel.tab_widget.currentIndex() == 1
+
+    def test_auto_run_can_be_disabled(self, main_window: "MainWindow") -> None:
+        from unittest.mock import patch
+
+        from core.config import global_config
+
+        global_config.update({"USERNAME": "test", "PASSWORD": "test", "AUTO_RUN_ON_START": False})
+        main_window._task_chain_started = False
+        with patch("gui.main_window.QTimer.singleShot") as schedule:
+            main_window.run_on_start()
+            schedule.assert_not_called()
+        assert "自动执行已关闭" in main_window.footer_status.text()
+
+    def test_login_result_does_not_claim_shutdown_time_passed(
+        self, main_window: "MainWindow"
+    ) -> None:
+        main_window._on_chain_success(
+            True, {"连接WiFi": {"wifi_connected": None}, "登录校园网": {"login_successful": True}}
+        )
+        assert "校园网登录成功" in main_window.footer_status.text()
+        assert "已过" not in main_window.footer_status.text()
+        assert main_window._shutdown_deadline is None

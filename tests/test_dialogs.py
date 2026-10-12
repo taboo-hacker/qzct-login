@@ -237,6 +237,8 @@ class TestSettingsDialog:
 
         assert panel.wifi_name_edit is not None
         panel.wifi_name_edit.setText("NewWiFi")
+        panel.auto_run_check.setChecked(False)
+        panel.shutdown_enabled_check.setChecked(True)
         panel.save_config()
 
         assert global_config.get("WIFI_NAME") == "NewWiFi"
@@ -245,6 +247,9 @@ class TestSettingsDialog:
             json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))["WIFI_NAME"]
             == "NewWiFi"
         )
+        saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+        assert saved["AUTO_RUN_ON_START"] is False
+        assert saved["SHUTDOWN_ENABLED"] is True
         assert saved_signals == [True]
 
     def test_theme_selector(self, qtbot: QtBot) -> None:

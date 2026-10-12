@@ -101,7 +101,7 @@ def task_campus_login(ctx: TaskContext) -> dict[str, Any]:
 
 @task("设置定时关机", timeout=10)
 def task_set_shutdown(ctx: TaskContext, check_date: datetime.date | None = None) -> dict[str, Any]:
-    """步骤 4：按配置的 SHUTDOWN_HOUR/MIN 设置 Windows 定时关机。
+    """步骤 4：启用关机后按 SHUTDOWN_HOUR/MIN 设置 Windows 定时关机。
 
     已过今日关机时间则跳过（例如中午开机时配置的是 0:30）；
     设置前会先取消已有关机任务（见 set_shutdown_timer）。
@@ -109,6 +109,9 @@ def task_set_shutdown(ctx: TaskContext, check_date: datetime.date | None = None)
     ctx.log("开始设置定时关机")
 
     cfg = get_config_snapshot()
+    if not cfg.get("SHUTDOWN_ENABLED", False):
+        ctx.log("定时关机未启用，跳过")
+        return {"shutdown_set": False, "reason": "disabled"}
     try:
         shutdown_hour = cfg.get("SHUTDOWN_HOUR", 23)
         shutdown_min = cfg.get("SHUTDOWN_MIN", 0)

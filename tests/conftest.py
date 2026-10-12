@@ -70,6 +70,8 @@ def sample_config() -> dict:
         "SHUTDOWN_HOUR": 23,
         "SHUTDOWN_MIN": 0,
         "AUTOSTART": False,
+        "SHUTDOWN_ENABLED": True,
+        "AUTO_RUN_ON_START": True,
         "SHOW_LUNAR_CALENDAR": True,
         "HOLIDAY_PERIODS": [{"name": "测试假期", "start": "2026-01-01", "end": "2026-01-03"}],
         "COMPENSATORY_WORKDAYS": ["2026-01-04"],

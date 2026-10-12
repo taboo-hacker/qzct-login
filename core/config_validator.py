@@ -61,6 +61,8 @@ _SCHEMA: dict[str, tuple[type, Any]] = {
     "SHUTDOWN_HOUR": (int, lambda v: 0 <= v <= 23),
     "SHUTDOWN_MIN": (int, lambda v: 0 <= v <= 59),
     "AUTOSTART": (bool, None),
+    "AUTO_RUN_ON_START": (bool, None),
+    "SHUTDOWN_ENABLED": (bool, None),
     "THEME": (str, lambda v: v in ("light", "dark")),
     "ACTIVE_TAB": (str, lambda v: v in TAB_NAMES),
     # 窗口几何是不透明的 base64 串，长度上限防御异常膨胀的配置文件

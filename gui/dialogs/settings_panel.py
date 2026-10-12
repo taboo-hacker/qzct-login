@@ -71,6 +71,11 @@ class SettingsPanel(QWidget):
         self.lunar_format_combo: QComboBox | None = None
         self.theme_combo: QComboBox | None = None
 
+        self.auto_run_check = QCheckBox("打开软件后按日期规则自动执行")
+        self.auto_run_check.setChecked(global_config.get("AUTO_RUN_ON_START", True))
+        self.shutdown_enabled_check = QCheckBox("自动执行时启用定时关机")
+        self.shutdown_enabled_check.setChecked(global_config.get("SHUTDOWN_ENABLED", False))
+
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -240,6 +245,11 @@ class SettingsPanel(QWidget):
         """创建自动关机配置标签页"""
         shutdown_tab, shutdown_layout = self._create_form_tab()
 
+        shutdown_layout.addRow(self.shutdown_enabled_check)
+        shutdown_layout.addRow(
+            create_tip_label("一键登录不会设置或取消关机；自动执行和「按规则执行」才使用此开关。")
+        )
+
         self.shutdown_hour_edit = QLineEdit()
         self.shutdown_hour_edit.setText(
             str(global_config.get("SHUTDOWN_HOUR", DEFAULT_CONFIG["SHUTDOWN_HOUR"]))
@@ -282,6 +292,11 @@ class SettingsPanel(QWidget):
         app_layout = QVBoxLayout(app_tab)
         app_layout.setSpacing(10)
         app_layout.setContentsMargins(16, 12, 16, 12)
+
+        app_layout.addWidget(self.auto_run_check)
+        app_layout.addWidget(
+            create_tip_label("此选项控制打开软件后的行为，不是 Windows 开机自启。")
+        )
 
         # 万年历显示设置
         calendar_title = create_section_title("万年历显示设置")
@@ -491,13 +506,16 @@ class SettingsPanel(QWidget):
         pending["RETRY_INTERVAL"] = retry_interval
 
         # 校园网登录配置
-        pending["USERNAME"] = self.username_edit.text()
+        pending["USERNAME"] = self.username_edit.text().strip()
         pending["PASSWORD"] = self.password_edit.text()
 
         isp_key = self.isp_combo.currentData()
         pending["ISP_TYPE"] = isp_key if isp_key in ISP_MAPPING else "telecom"
 
         pending["WAN_IP"] = self.wan_ip_edit.text()
+
+        pending["AUTO_RUN_ON_START"] = self.auto_run_check.isChecked()
+        pending["SHUTDOWN_ENABLED"] = self.shutdown_enabled_check.isChecked()
 
         # 自动关机配置
         shutdown_hour = self._read_int(

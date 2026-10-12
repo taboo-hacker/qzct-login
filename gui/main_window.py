@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
 
-        self.setWindowTitle("校园网自动登录 + 定时关机")
+        self.setWindowTitle("QZCT 校园网助手")
         self.setMinimumSize(660, 460)
         self.resize(800, 500)
         self._force_quit = False
@@ -144,6 +144,8 @@ class MainWindow(QMainWindow):
         # 还原上次退出时的窗口几何与标签页（须在 show() 之前调用，
         # 否则窗口会先以默认尺寸闪现一次再跳变）
         self._restore_window_state()
+        if not self._has_login_credentials():
+            self._show_login_setup()
 
         # 重定向输出
         self._original_stdout = sys.stdout
@@ -304,11 +306,16 @@ class MainWindow(QMainWindow):
         action_title.setProperty("role", "sectionTitle")
         v.addWidget(action_title)
 
-        self.run_btn = create_button("立即执行", btn_type="primary", min_height=32)
-        self.run_btn.setToolTip("执行 WiFi 连接、校园网登录、定时关机 (Ctrl+R)")
+        self.run_btn = create_button("一键登录", btn_type="primary", min_height=32)
+        self.run_btn.setToolTip("连接 WiFi 并登录校园网，周末也可用，不设置关机 (Ctrl+R)")
         self.run_btn.setShortcut("Ctrl+R")
         self.run_btn.clicked.connect(self.on_run_once)
         v.addWidget(self.run_btn)
+
+        self.routine_btn = create_button("按规则执行", btn_type="outline", min_height=30)
+        self.routine_btn.setToolTip("按日期规则执行登录，并使用定时关机设置")
+        self.routine_btn.clicked.connect(self.on_run_routine)
+        v.addWidget(self.routine_btn)
 
         self.cancel_btn = create_button("取消关机", btn_type="outline_danger", min_height=30)
         self.cancel_btn.setToolTip("取消已设置的关机任务")
@@ -466,7 +473,8 @@ class MainWindow(QMainWindow):
         self.run_btn.setEnabled(enabled)
         self.test_wifi_btn.setEnabled(enabled)
         self.test_login_btn.setEnabled(enabled)
-        self.run_btn.setText("立即执行" if enabled else busy_text)
+        self.routine_btn.setEnabled(enabled)
+        self.run_btn.setText("一键登录" if enabled else busy_text)
 
     def _update_status_display(self) -> None:
         """刷新左侧卡片：日期、执行状态徽标、生效规则来源、关机时间。
@@ -480,11 +488,12 @@ class MainWindow(QMainWindow):
         need_work = should_work_today()
         rule_source_text = describe_source(rule_source(today)[0])
 
-        work_status = "今天需要执行任务" if need_work else "今天无需执行"
+        work_status = "自动流程今天需要执行" if need_work else "自动流程今天无需执行"
         weekday = "一二三四五六日"[today.weekday()]
 
         self.date_label.setText(f"{today.year}年{today.month}月{today.day}日 · 星期{weekday}")
         self.status_badge.setText(work_status)
+        self.status_badge.setToolTip("日期规则仅约束自动流程；一键登录每天都可以使用")
         self.status_badge.setProperty("state", "work" if need_work else "rest")
         # 属性变更后刷新样式
         style = self.status_badge.style()
@@ -496,42 +505,41 @@ class MainWindow(QMainWindow):
             f"关机时间：{global_config.get('SHUTDOWN_HOUR', 23):02d}:"
             f"{global_config.get('SHUTDOWN_MIN', 0):02d}"
         )
+        if not global_config.get("SHUTDOWN_ENABLED", False):
+            self.time_label.setText("定时关机：未启用")
+        self.time_label.setToolTip("一键登录不会设置关机；此处是按规则执行时的关机设置")
 
     # ------------------------------------------------------------------
     # 任务链
     # ------------------------------------------------------------------
 
     def run_on_start(self) -> None:
-        """程序启动后延迟 1 秒自动执行任务链（仅一次，_task_chain_started 防重）。
-
-        首次使用（账号与 WiFi 均未配置）时跳过自动执行：空账号登录注定
-        失败，且链尾仍会按默认 23:00 设置关机——相当于"装完即被安排关机"。
-        """
+        """账号完整且开启自动执行时，按日期规则调度一次任务链。"""
         if self._task_chain_started:
             return
         self._task_chain_started = True
-        username = str(global_config.get("USERNAME", ""))
-        wifi_name = str(global_config.get("WIFI_NAME", ""))
-        if not username and not wifi_name:
-            info("main", "首次使用：账号与 WiFi 均未配置，跳过启动自动执行")
-            self.footer_status.setText("尚未配置账号，已跳过自动执行")
-            self._tray.notify(
-                "校园网自动登录",
-                "尚未配置账号，已跳过自动执行。请到「设置」填写 WiFi 与账号后手动执行",
-            )
+        if not self._has_login_credentials():
+            info("main", "尚未配置账号或密码，跳过启动自动执行")
+            self._set_footer("尚未配置账号或密码，请填写后保存，再点击一键登录")
+            self._show_login_setup()
+            return
+        if not global_config.get("AUTO_RUN_ON_START", True):
+            self._set_footer("自动执行已关闭，需要上网时点击一键登录")
             return
         info("main", "程序启动，开始自动执行任务链")
         QTimer.singleShot(1000, self.start_task_chain)
 
-    def start_task_chain(self) -> None:
-        """组装并启动完整任务链：检查条件 → WiFi → 登录 → 定时关机。
+    def start_task_chain(self, *, login_only: bool = False) -> None:
+        """组装任务链：手动登录仅 WiFi/认证，自动流程按规则并可选关机。
 
         每次启动新建 TaskExecutor（旧 executor 先关闭），链进度通过
         started/finished/error 三个信号驱动底部状态栏。
         """
         # 防重入：旧链仍在执行时忽略重复启动请求（否则旧链信号会在
         # 已关闭的线程池上触发提交，导致 PySide6 abort）
-        if self.task_executor is not None and self.task_executor.is_chain_active():
+        if self._task_busy or (
+            self.task_executor is not None and self.task_executor.is_chain_active()
+        ):
             info("main", "任务链正在执行，忽略重复启动请求")
             return
         self._set_buttons_enabled(False)
@@ -546,12 +554,14 @@ class MainWindow(QMainWindow):
         self.task_executor.error.connect(self._on_task_error)
 
         chain = TaskChain(parent=self)
-        chain.add(task_check_condition)
+        if not login_only:
+            chain.add(task_check_condition)
         # WiFi 步骤使用按配置动态估算的超时预算（重试次数/退避均可配，
         # 静态超时会误杀长重试链），覆盖 @task 装饰器的默认超时
         chain.add(task_connect_wifi, timeout=estimate_wifi_retry_budget(get_config_snapshot()))
         chain.add(task_campus_login)
-        chain.add(task_set_shutdown)
+        if not login_only and global_config.get("SHUTDOWN_ENABLED", False):
+            chain.add(task_set_shutdown)
         chain.on_success(self._on_chain_success)
         chain.on_error(self._on_chain_error)
         # 记录步骤顺序与各步起始时刻，供 started/finished 信号换算"第 N/M 步"与耗时
@@ -676,6 +686,9 @@ class MainWindow(QMainWindow):
             self._tray.notify(
                 "校园网自动登录", f"所有任务执行完成，已设置 {hh:02d}:{mm:02d} 定时关机"
             )
+        elif not isinstance(shutdown_result, dict) or shutdown_result.get("reason") == "disabled":
+            self._set_footer("校园网登录成功，本次未设置关机")
+            self._tray.notify("校园网自动登录", "校园网登录成功，本次未设置关机")
         else:
             self._set_footer("所有任务执行完成（已过今日关机时间，未设置关机）")
             info("main", "任务链执行成功（已过今日关机时间，未设置关机）")
@@ -737,14 +750,46 @@ class MainWindow(QMainWindow):
             == QMessageBox.StandardButton.Yes
         )
 
-    def on_run_once(self) -> None:
-        """「立即执行」按钮：确认后手动触发一次完整任务链（Ctrl+R）。
+    @staticmethod
+    def _has_login_credentials() -> bool:
+        cfg = get_config_snapshot()
+        return bool(str(cfg.get("USERNAME", "")).strip() and cfg.get("PASSWORD", ""))
 
-        确认框默认聚焦"否"：执行链会设置定时关机，属危险操作，回车不应直接放行。
-        """
-        if self._confirm("确认", "是否立即执行一次完整任务（WiFi+登录+关机）？", default_no=True):
-            info("main", "用户手动触发：开始执行完整任务链")
-            self.start_task_chain()
+    def _show_login_setup(self) -> None:
+        self.on_settings()
+        assert self._settings_panel.tab_widget is not None
+        self._settings_panel.tab_widget.setCurrentIndex(1)
+        if self._settings_panel.username_edit is not None:
+            self._settings_panel.username_edit.setFocus()
+
+    def on_run_once(self) -> None:
+        """一键登录：无确认框、无日期限制，也不设置或取消关机。"""
+        if self._task_busy:
+            return
+        if not self._has_login_credentials():
+            self._show_login_setup()
+            self._set_footer("请先填写校园网账号、密码和运营商，保存后即可一键登录")
+            return
+        self.start_task_chain(login_only=True)
+
+    def on_run_routine(self) -> None:
+        """按规则执行：关机启用时明确告知时间并确认。"""
+        if self._task_busy:
+            return
+        if not self._has_login_credentials():
+            self._show_login_setup()
+            self._set_footer("请先填写账号和密码并保存")
+            return
+        if global_config.get("SHUTDOWN_ENABLED", False):
+            hh = int(global_config.get("SHUTDOWN_HOUR", 23))
+            mm = int(global_config.get("SHUTDOWN_MIN", 0))
+            if not self._confirm(
+                "按规则执行",
+                f"今天符合日期规则时，将连接校园网并设置 {hh:02d}:{mm:02d} 定时关机。是否继续？",
+                default_no=True,
+            ):
+                return
+        self.start_task_chain()
 
     def on_cancel_shutdown(self) -> None:
         """「取消关机」按钮：确认后在后台执行 shutdown /a，并按返回值反馈结果。

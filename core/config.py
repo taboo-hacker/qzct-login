@@ -60,6 +60,8 @@ def _cleanup_legacy_files() -> None:
 #   WAN_IP                    认证参数中的 wlan_user_ip（一般留空即可）
 #   SHUTDOWN_HOUR/MIN         定时关机时间（24 小时制）
 #   AUTOSTART                 开机自启开关（当前版本未实现写注册表，保留字段）
+#   AUTO_RUN_ON_START         打开软件后自动按日期规则执行（不是系统开机自启）
+#   SHUTDOWN_ENABLED          自动流程是否安排关机，默认关闭，需用户明确开启
 #   THEME                     界面主题（light/dark）
 #   ACTIVE_TAB                退出时停留的标签页标识（log/settings/calendar，见 TAB_NAMES）
 #   WINDOW_GEOMETRY           窗口几何（QMainWindow.saveGeometry 的 base64），空串=用默认尺寸
@@ -80,6 +82,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "SHUTDOWN_HOUR": 23,
     "SHUTDOWN_MIN": 0,
     "AUTOSTART": False,
+    "AUTO_RUN_ON_START": True,
+    "SHUTDOWN_ENABLED": False,
     "THEME": "light",
     # 界面状态持久化：退出时写回，下次启动还原，避免每次都重新调整窗口与标签页
     "ACTIVE_TAB": "log",
